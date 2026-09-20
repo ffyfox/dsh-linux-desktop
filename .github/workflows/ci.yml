@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: 测试（Node ${{ matrix.node }} / ${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 是 engines 里声明的下限，24 覆盖较新的运行时。
+        node: ['20', '22', '24']
+        os: [ubuntu-latest]
+        include:
+          # 额外在 macOS 上跑一遍：本插件只对 Linux 生效，但在别的平台
+          # 也必须「安静地什么都不做」而不是崩溃。那一遍跑的是非 Linux 契约，
+          # 依赖 Linux 的用例会被 linuxOnly() 跳过。
+          - node: '22'
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 显示环境信息
+        run: |
+          node --version
+          uname -a
+
+      - name: 运行冒烟测试
+        run: node test/smoke.mjs
+
+      - name: 校验打包产物
+        run: npm pack --dry-run
+
+  packaging:
+    name: 发布前校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      # 这条跑的是 npm publish 会跑的那套检查（prepublishOnly 用的是同一个脚本）。
+      # 它会在 repository.url 是占位地址、版本号与 CHANGELOG 不一致、打包产物缺文件
+      # 时失败 —— 把问题挡在推送阶段，而不是挡在不可逆的发布阶段。
+      - run: node scripts/prepublish-check.mjs
