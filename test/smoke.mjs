@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { connectHost, defaultConfig, normalizeConfig } from '../src/config.js'
 import { detectBrowsers, detectDesktopEnvironment, findExecutable, resolveBrowser } from '../src/detect.js'
 import { chromiumAppId, escapeExecArg, renderDesktopEntry } from '../src/desktop-entry.js'
-import { install, renderTemplate, status, uninstall } from '../src/installer.js'
+import { install, renderTemplate, status, uninstall, writeConfig } from '../src/installer.js'
 import { getKey, parseKconfig, removeSizeRule, serializeKconfig, setKey, upsertSizeRule } from '../src/kwin.js'
 import {
   MARK_BEGIN,
@@ -35,6 +35,14 @@ import {
   upsertWindowRule,
   versionAtLeast,
 } from '../src/hyprland.js'
+import {
+  AUTO_MAXIMIZE_RATIO,
+  assessGnomeWindowSize,
+  logicalMonitorSize,
+  parseGdctlShow,
+  readAutoMaximize,
+  readGnomeWorkArea,
+} from '../src/gnome.js'
 import { ICON_SIZES, iconDirFor, iconFileFor, resolvePaths } from '../src/paths.js'
 import { clearRuntime, inspectRuntime, isProcessAlive, readRuntime, writeRuntime } from '../src/runtime.js'
 import { createSettingsSchema, SETTINGS_FIELDS, SETTINGS_NAMESPACE, settingsBase } from '../src/settings.js'
@@ -691,6 +699,341 @@ await test('卸载：只删我们的块，用户配置复原', () => {
 
   uninstall({ paths: box.paths, env: box.env })
   assert.equal(fs.readFileSync(box.file, 'utf8'), SAMPLE_HYPR_CONF, '卸载后应完全复原')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+// ---------------------------------------------------------------------------
+section('GNOME 尺寸现实检查（实测语义回归）')
+// ---------------------------------------------------------------------------
+
+/**
+ * 真实的 `gdctl show` 输出。
+ *
+ * 来自本机 headless mutter 50.5（虚拟显示器 2560x1600 @ scale 1.0）。用真实样本
+ * 做回归，解析器一旦被改坏就会立刻暴露 —— 而不是等用户报「诊断里的屏幕尺寸不对」。
+ */
+const SAMPLE_GDCTL_SHOW = `Monitors:
+└──Monitor Meta-0 (MetaVendor)
+   ├──Vendor: MetaVendor
+   ├──Product: MetaVirtualMonitor
+   ├──Serial: 0x00
+   ├──Current mode
+   │   └──2560x1600@60.000
+   └──Preferences
+       └──Backlight: None
+
+Logical monitors:
+└──Logical monitor #1
+   ├──Position: (0, 0)
+   ├──Scale: 1.0
+   ├──Transform: normal
+   ├──Primary: yes
+   └──Monitors: (1)
+       └──Meta-0 (MetaVendor)
+`
+
+await test('parseGdctlShow 解析真实输出', () => {
+  const parsed = parseGdctlShow(SAMPLE_GDCTL_SHOW)
+  assert.equal(parsed.ok, true, parsed.reason)
+  assert.deepEqual(parsed.monitors, [{ connector: 'Meta-0', width: 2560, height: 1600 }])
+  assert.equal(parsed.logical.length, 1)
+  assert.equal(parsed.logical[0].scale, 1)
+  assert.equal(parsed.logical[0].primary, true)
+  assert.deepEqual(parsed.logical[0].connectors, ['Meta-0'])
+})
+
+await test('logicalMonitorSize 按缩放折算逻辑尺寸', () => {
+  const size = logicalMonitorSize(parseGdctlShow(SAMPLE_GDCTL_SHOW))
+  assert.equal(size.ok, true)
+  assert.equal(size.width, 2560)
+  assert.equal(size.height, 1600)
+  assert.equal(size.scale, 1)
+})
+
+await test('缩放 2 时逻辑尺寸减半（实测踩过的 dpr=2 场景）', () => {
+  // 这条对应真实经历：Mutter 读到用户 dconf 的 scaling-factor=2，逻辑工作区变成
+  // 1280x800，auto-maximize 比的就是这个逻辑值。折算错了，告警就会算错。
+  const scaled = SAMPLE_GDCTL_SHOW.replace('Scale: 1.0', 'Scale: 2.0')
+  const size = logicalMonitorSize(parseGdctlShow(scaled))
+  assert.equal(size.ok, true)
+  assert.equal(size.width, 1280)
+  assert.equal(size.height, 800)
+  assert.equal(size.scale, 2)
+})
+
+await test('镜像的多显示器逻辑尺寸取各边最大值', () => {
+  const mirrored = `Monitors:
+└──Monitor eDP-1 (Vendor)
+   ├──Current mode
+   │   └──1920x1080@60.000
+└──Monitor DP-1 (Vendor)
+   ├──Current mode
+   │   └──2560x1440@60.000
+
+Logical monitors:
+└──Logical monitor #1
+   ├──Scale: 1.0
+   ├──Primary: yes
+   └──Monitors: (2)
+       └──eDP-1 (Vendor)
+       └──DP-1 (Vendor)
+`
+  const size = logicalMonitorSize(parseGdctlShow(mirrored))
+  assert.equal(size.ok, true)
+  assert.equal(size.width, 2560)
+  assert.equal(size.height, 1440)
+})
+
+await test('gdctl 输出看不懂时返回 ok:false，绝不瞎猜尺寸', () => {
+  assert.equal(parseGdctlShow('').ok, false)
+  assert.equal(parseGdctlShow('hello world').ok, false)
+  assert.equal(parseGdctlShow('Monitors:\n').ok, false, '没有 Logical monitors 段必须判失败')
+  assert.equal(logicalMonitorSize({ ok: false, reason: 'x' }).ok, false)
+})
+
+await test('面积低于阈值：安全', () => {
+  const a = assessGnomeWindowSize({
+    workArea: { ok: true, width: 2560, height: 1600 },
+    size: { width: 1200, height: 750 },
+    autoMaximize: { ok: true, enabled: true },
+  })
+  assert.equal(a.risk, 'safe')
+  assert.equal(a.level, 'info')
+  assert.ok(Math.abs(a.ratio - 0.2197) < 0.001)
+})
+
+await test('面积超过阈值：告警，且带上真实百分比', () => {
+  const a = assessGnomeWindowSize({
+    workArea: { ok: true, width: 2560, height: 1600 },
+    size: { width: 2400, height: 1500 },
+    autoMaximize: { ok: true, enabled: true },
+  })
+  assert.equal(a.risk, 'too-large')
+  assert.equal(a.level, 'warning')
+  assert.match(a.message, /88%/, '要给出算出来的占比，而不是一句笼统的提示')
+  assert.match(a.message, /最大化/)
+  // 建议尺寸应保持宽高比、且面积刚好落到阈值上。
+  assert.deepEqual(a.suggested, { width: 2289, height: 1431 })
+  assert.ok(a.suggested.width * a.suggested.height <= 2560 * 1600 * AUTO_MAXIMIZE_RATIO)
+  assert.match(a.advice, /2289x1431/)
+  assert.notEqual(a.advice, a.message, '发现与动作必须是两句话')
+})
+
+await test('安全时没有 advice / suggested', () => {
+  const a = assessGnomeWindowSize({
+    workArea: { ok: true, width: 2560, height: 1600 },
+    size: { width: 1200, height: 750 },
+    autoMaximize: { ok: true, enabled: true },
+  })
+  assert.equal(a.advice, null)
+  assert.equal(a.suggested, null)
+})
+
+await test('阈值就是源码常量 0.8，不是实测的 0.833', () => {
+  // 实测翻转点在 83.2%~83.8% 之间，与源码常量 0.8 对不上（原因未查明）。
+  // 这里刻意钉住「用更保守的 0.8」这个决定：改掉它等于放宽告警，必须是有意为之。
+  assert.equal(AUTO_MAXIMIZE_RATIO, 0.8)
+})
+
+await test('auto-maximize 已关闭时，满屏尺寸也算安全', () => {
+  const a = assessGnomeWindowSize({
+    workArea: { ok: true, width: 2560, height: 1600 },
+    size: { width: 2560, height: 1600 },
+    autoMaximize: { ok: true, enabled: false },
+  })
+  assert.equal(a.risk, 'safe')
+  assert.match(a.message, /auto-maximize 已关闭/)
+})
+
+await test('读不出工作区时降级成不带数字的说明', () => {
+  const a = assessGnomeWindowSize({
+    workArea: { ok: false, reason: 'gdctl 不存在' },
+    size: { width: 1200, height: 750 },
+    autoMaximize: { ok: false, reason: 'no gsettings' },
+  })
+  assert.equal(a.risk, 'unknown')
+  assert.equal(a.level, 'info')
+  assert.equal(a.ratio, null, '读不出屏幕尺寸就不该编一个占比出来')
+  assert.match(a.message, /80%/, '仍然要说明阈值这回事')
+})
+
+await test('readGnomeWorkArea / readAutoMaximize 出错时不抛异常', () => {
+  const boom = () => {
+    throw new Error('command not found')
+  }
+  assert.equal(readGnomeWorkArea({ exec: boom }).ok, false)
+  assert.equal(readAutoMaximize({ exec: boom }).ok, false)
+  assert.equal(readGnomeWorkArea({ exec: () => '' }).ok, false)
+})
+
+await test('readAutoMaximize 只认 true/false', () => {
+  const fake = (out) => readAutoMaximize({ exec: () => out })
+  assert.equal(fake('true\n').enabled, true)
+  assert.equal(fake('false\n').enabled, false)
+  assert.equal(fake('maybe').ok, false, '认不出来就必须报失败，不能默认成 true 或 false')
+})
+
+// ---------------------------------------------------------------------------
+section('GNOME 接入 installer：只读，绝不写配置')
+// ---------------------------------------------------------------------------
+
+/**
+ * 假的 exec：替掉对真实 `gdctl` / `gsettings` 的调用。
+ *
+ * 与 Hyprland 那组同一个理由 —— CI runner 上没有 GNOME。而且这里要验证的本来
+ * 也不是「GNOME 怎么回答」，而是「我们拿到回答之后**只读不写**」。
+ */
+function fakeGnomeExec({ workArea = SAMPLE_GDCTL_SHOW, autoMaximize = 'true', gdctlFails = false, gsettingsFails = false } = {}) {
+  const calls = []
+  const exec = (cmd, args) => {
+    calls.push([cmd, ...args].join(' '))
+    if (cmd === 'gdctl') {
+      if (gdctlFails) throw new Error('gdctl: command not found')
+      return workArea
+    }
+    if (cmd === 'gsettings') {
+      if (gsettingsFails) throw new Error('gsettings: command not found')
+      return autoMaximize
+    }
+    throw new Error(`unexpected exec: ${cmd}`)
+  }
+  return { exec, calls }
+}
+
+/** 搭一个「桌面环境是 GNOME」的安装沙箱。 */
+function makeGnomeInstallSandbox(name, { size } = {}) {
+  const dir = makeSandbox(name)
+  const paths = resolvePaths({ HOME: dir, DSH_DESKTOP_ROOT: dir })
+  const toolchain = makeFakeToolchain()
+  const env = {
+    ...process.env,
+    DSH_DESKTOP_ROOT: dir,
+    PATH: toolchain.pathValue,
+    XDG_CURRENT_DESKTOP: 'GNOME',
+    WAYLAND_DISPLAY: 'wayland-1',
+  }
+  const config = size ? { ...defaultConfig(), window: size } : defaultConfig()
+  // status() 是**从磁盘读配置**的（它没有 config 入参），所以尺寸必须真的落盘，
+  // 否则 status 看到的永远是默认的 1200x750 —— 测试会测了个寂寞。
+  if (size) {
+    fs.mkdirSync(paths.configDir, { recursive: true })
+    writeConfig(paths, config)
+  }
+  return { dir, paths, env, config }
+}
+
+await test('尺寸安全时：只给一条 info 说明', () => {
+  const box = makeGnomeInstallSandbox('gnome-safe')
+  const { exec } = fakeGnomeExec()
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  const step = stepOf(result, 'gnome-window-size')
+  assert.ok(step, 'GNOME 上应当有一条尺寸说明')
+  assert.equal(step.status, 'info')
+  assert.match(step.detail, /原生遵循/)
+  assert.equal(result.warnings.length, 0, '安全时不该产生警告')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('尺寸过大时：升级成 warning 并进 warnings', () => {
+  const box = makeGnomeInstallSandbox('gnome-toobig', { size: { width: 2400, height: 1500 } })
+  const { exec } = fakeGnomeExec()
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  const step = stepOf(result, 'gnome-window-size')
+  assert.equal(step.status, 'warning')
+  assert.equal(result.warnings.length, 1)
+  // warnings 放的是「动作」，不是把步骤行原样重复 —— 否则 CLI 上会出现两行一样的话。
+  assert.notEqual(result.warnings[0], step.detail, '步骤行与警告不能是同一句话')
+  assert.match(result.warnings[0], /gsettings set org\.gnome\.mutter auto-maximize false/)
+  assert.match(result.warnings[0], /2289x1431/, '要给出算出来的建议尺寸')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('★ 绝不写配置：每一次 exec 都是只读命令', () => {
+  // 这是本模块存在的全部意义。GNOME 没有可写的窗口规则，所以我们一行都不写；
+  // 一旦有人往这里加了 `gsettings set` / `reset`，这条会立刻失败。
+  const box = makeGnomeInstallSandbox('gnome-readonly', { size: { width: 2400, height: 1500 } })
+  const { exec, calls } = fakeGnomeExec()
+  install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  assert.ok(calls.length > 0, '应当真的去读过事实')
+  for (const call of calls) {
+    const readOnly = call === 'gdctl show' || call === 'gsettings get org.gnome.mutter auto-maximize'
+    assert.ok(readOnly, `出现了非只读调用：${call}`)
+  }
+  assert.equal(calls.filter((c) => /gsettings (set|reset|writable)/.test(c)).length, 0)
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('GNOME 上也绝不碰 Hyprland / KWin 的东西', () => {
+  const box = makeGnomeInstallSandbox('gnome-nocross')
+  const { exec } = fakeGnomeExec()
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'skipped')
+  assert.equal(stepOf(result, 'kwin-rule').status, 'skipped')
+  assert.equal(fs.existsSync(box.paths.hyprlandConfFile), false, '不该替 GNOME 用户建 Hyprland 配置')
+  assert.equal(fs.existsSync(box.paths.kwinRulesFile), false, '不该替 GNOME 用户建 KWin 规则')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('非 GNOME 桌面不产生 gnome-window-size 这一步', () => {
+  const box = makeGnomeInstallSandbox('gnome-otherde')
+  const { exec, calls } = fakeGnomeExec()
+  const env = { ...box.env, XDG_CURRENT_DESKTOP: 'KDE' }
+  const result = install({ paths: box.paths, env, config: box.config, quiet: true, exec })
+
+  assert.equal(stepOf(result, 'gnome-window-size'), undefined)
+  assert.equal(calls.length, 0, '不是 GNOME 就不该去调 gdctl / gsettings')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('gdctl 读不出来时仍然给说明，不报失败', () => {
+  const box = makeGnomeInstallSandbox('gnome-nogdctl')
+  const { exec } = fakeGnomeExec({ gdctlFails: true, gsettingsFails: true })
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  const step = stepOf(result, 'gnome-window-size')
+  assert.equal(step.status, 'info', '读不出来是正常情况（比如不在 GNOME 会话里），不该报错')
+  assert.equal(result.warnings.length, 0)
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('status：GNOME 上给出尺寸检查项', () => {
+  const box = makeGnomeInstallSandbox('gnome-status', { size: { width: 2400, height: 1500 } })
+  const { exec } = fakeGnomeExec()
+  const report = status({ paths: box.paths, env: box.env, exec })
+
+  const check = report.checks.find((c) => c.id === 'gnome-window-size')
+  assert.ok(check, 'status 里应当有 gnome-window-size')
+  assert.equal(check.ok, false)
+  assert.equal(check.level, 'warning')
+  assert.match(check.detail, /最大化/)
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('status：安全尺寸时是 info 而不是 error', () => {
+  const box = makeGnomeInstallSandbox('gnome-status-ok')
+  const { exec } = fakeGnomeExec()
+  const report = status({ paths: box.paths, env: box.env, exec })
+
+  const check = report.checks.find((c) => c.id === 'gnome-window-size')
+  assert.equal(check.ok, true)
+  assert.equal(check.level, 'info')
+  // info 级别不参与 healthy 判定：GNOME 上没有规则可写，不该因此让整体「不健康」。
+  // （这里只针对这一项断言 —— 沙箱里还没安装，别的检查项本来就可能是红的。）
+  assert.notEqual(check.level, 'error')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('status：非 GNOME 桌面没有这一项', () => {
+  const box = makeGnomeInstallSandbox('gnome-status-other')
+  const { exec, calls } = fakeGnomeExec()
+  const report = status({ paths: box.paths, env: { ...box.env, XDG_CURRENT_DESKTOP: 'Hyprland' }, exec })
+
+  assert.equal(report.checks.find((c) => c.id === 'gnome-window-size'), undefined)
+  assert.equal(calls.length, 0)
   fs.rmSync(box.dir, { recursive: true, force: true })
 })
 
