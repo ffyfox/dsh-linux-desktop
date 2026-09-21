@@ -22,6 +22,19 @@ import { detectBrowsers, detectDesktopEnvironment, findExecutable, resolveBrowse
 import { chromiumAppId, escapeExecArg, renderDesktopEntry } from '../src/desktop-entry.js'
 import { install, renderTemplate, status, uninstall } from '../src/installer.js'
 import { getKey, parseKconfig, removeSizeRule, serializeKconfig, setKey, upsertSizeRule } from '../src/kwin.js'
+import {
+  MARK_BEGIN,
+  MIN_MODERN_VERSION,
+  buildRuleBlock,
+  detectConfigFile,
+  escapeClassForConf,
+  escapeClassForLua,
+  hasWindowRule,
+  parseVersion,
+  removeWindowRule,
+  upsertWindowRule,
+  versionAtLeast,
+} from '../src/hyprland.js'
 import { ICON_SIZES, iconDirFor, iconFileFor, resolvePaths } from '../src/paths.js'
 import { clearRuntime, inspectRuntime, isProcessAlive, readRuntime, writeRuntime } from '../src/runtime.js'
 import { createSettingsSchema, SETTINGS_FIELDS, SETTINGS_NAMESPACE, settingsBase } from '../src/settings.js'
@@ -290,6 +303,395 @@ await test('文件不存在时 remove 不报错', () => {
   const result = removeSizeRule({ file: path.join(dir, 'nope') })
   assert.equal(result.changed, false)
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+// ---------------------------------------------------------------------------
+section('Hyprland 窗口规则（实测语义回归）')
+// ---------------------------------------------------------------------------
+
+const HYPR_APP_ID = 'chrome-127.0.0.1__-Default'
+
+// 用户在 hyprland.conf 里手写的内容，必须一字不差地留着。
+const SAMPLE_HYPR_CONF = `monitor = , preferred, auto, 1
+
+# 我自己写的规则
+windowrule = match:class ^(kitty)$, float on, size 900 600
+
+misc {
+    disable_hyprland_logo = true
+}
+`
+
+const SAMPLE_HYPR_LUA = `hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
+
+hl.window_rule({
+    name  = "my-kitty-rule",
+    match = { class = "^kitty$" },
+    float = true,
+})
+
+hl.config({
+    misc = { disable_hyprland_logo = true },
+})
+`
+
+await test('版本串解析与比较', () => {
+  assert.deepEqual(parseVersion('0.56.2'), [0, 56, 2])
+  assert.deepEqual(parseVersion('v0.53'), [0, 53, 0])
+  assert.equal(parseVersion('nonsense'), null)
+  assert.equal(versionAtLeast([0, 56, 2], MIN_MODERN_VERSION), true)
+  assert.equal(versionAtLeast([0, 53, 0], MIN_MODERN_VERSION), true)
+  assert.equal(versionAtLeast([0, 52, 9], MIN_MODERN_VERSION), false, '0.52 不该被判为支持新语法')
+  assert.equal(versionAtLeast([1, 0, 0], MIN_MODERN_VERSION), true)
+  assert.equal(versionAtLeast(null, MIN_MODERN_VERSION), false)
+})
+
+await test('class 转义：conf 用正则转义，lua 再多翻一层反斜杠', () => {
+  // `.` 必须转义，否则正则里会变成「任意字符」。
+  assert.equal(escapeClassForConf(HYPR_APP_ID), 'chrome-127\\.0\\.0\\.1__-Default')
+  // Lua 里 `\.` 是非法转义，必须写成 `\\.`。
+  assert.equal(escapeClassForLua(HYPR_APP_ID), 'chrome-127\\\\.0\\\\.0\\\\.1__-Default')
+})
+
+await test('conf 规则必须同时带 float —— 少了它 size 会被平铺吞掉', () => {
+  const block = buildRuleBlock({ format: 'conf', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+  assert.match(block, /^# dsh-desktop begin$/m)
+  assert.match(block, /^# dsh-desktop end$/m)
+  assert.match(block, /windowrule = match:class \^\(chrome-127\\\.0\\\.0\\\.1__-Default\)\$, float on, size 1200 850/)
+  assert.ok(!block.includes('windowrulev2'), '0.56 上 windowrulev2 是硬错误，绝不能写')
+  assert.ok(!block.includes('source'), '绝不能写 source= —— 目标文件缺失会让整个配置加载失败')
+})
+
+await test('lua 规则用 hl.window_rule 且 float/size 是 lua 写法', () => {
+  const block = buildRuleBlock({ format: 'lua', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+  assert.match(block, /^-- dsh-desktop begin$/m)
+  assert.match(block, /^-- dsh-desktop end$/m)
+  assert.match(block, /hl\.window_rule\(\{/)
+  assert.match(block, /float = true,/)
+  assert.match(block, /size {2}= "1200 850",/)
+  // 双反斜杠：Lua 字符串里 `\.` 非法，必须 `\\.`
+  assert.match(block, /match = \{ class = "\^chrome-127\\\\\.0\\\\\.0\\\\\.1__-Default\$" \}/)
+})
+
+await test('选配置文件时 .lua 优先于 .conf（实测行为）', () => {
+  const dir = makeSandbox('hypr-detect')
+  const confFile = path.join(dir, 'hyprland.conf')
+  const luaFile = path.join(dir, 'hyprland.lua')
+
+  assert.deepEqual(detectConfigFile({ confFile, luaFile }), { file: null, format: null })
+
+  fs.writeFileSync(confFile, 'monitor = , preferred, auto, 1\n')
+  assert.deepEqual(detectConfigFile({ confFile, luaFile }), { file: confFile, format: 'conf' })
+
+  fs.writeFileSync(luaFile, 'hl.config({})\n')
+  assert.deepEqual(detectConfigFile({ confFile, luaFile }), { file: luaFile, format: 'lua' }, '.lua 应当胜出')
+
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('conf：追加规则时用户原有内容一字不差', () => {
+  const dir = makeSandbox('hypr-conf-add')
+  const file = path.join(dir, 'hyprland.conf')
+  fs.writeFileSync(file, SAMPLE_HYPR_CONF)
+
+  const result = upsertWindowRule({ file, format: 'conf', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+  assert.equal(result.changed, true)
+
+  const after = fs.readFileSync(file, 'utf8')
+  assert.ok(after.startsWith(SAMPLE_HYPR_CONF.trimEnd()), '原有内容必须原样保留在前面')
+  assert.ok(after.includes('windowrule = match:class ^(kitty)$, float on, size 900 600'), '用户自己的规则不能被动')
+  assert.ok(after.includes('# 我自己写的规则'))
+  assert.ok(after.includes(MARK_BEGIN))
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('conf：重复写入幂等', () => {
+  const dir = makeSandbox('hypr-conf-idem')
+  const file = path.join(dir, 'hyprland.conf')
+  fs.writeFileSync(file, SAMPLE_HYPR_CONF)
+  upsertWindowRule({ file, format: 'conf', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+  const first = fs.readFileSync(file, 'utf8')
+  const second = upsertWindowRule({ file, format: 'conf', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+  assert.equal(second.changed, false)
+  assert.equal(fs.readFileSync(file, 'utf8'), first)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('conf：改尺寸时原地更新而不是追加第二条', () => {
+  const dir = makeSandbox('hypr-conf-update')
+  const file = path.join(dir, 'hyprland.conf')
+  fs.writeFileSync(file, SAMPLE_HYPR_CONF)
+  upsertWindowRule({ file, format: 'conf', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+  upsertWindowRule({ file, format: 'conf', appId: HYPR_APP_ID, size: { width: 1000, height: 700 } })
+
+  const after = fs.readFileSync(file, 'utf8')
+  assert.match(after, /size 1000 700/)
+  assert.ok(!after.includes('size 1200 850'), '旧尺寸不该残留')
+  const marks = after.split('\n').filter((line) => line.includes(MARK_BEGIN)).length
+  assert.equal(marks, 1, '只应有一个标记块')
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('conf：移除后用户内容完好、不留空行堆积', () => {
+  const dir = makeSandbox('hypr-conf-remove')
+  const file = path.join(dir, 'hyprland.conf')
+  fs.writeFileSync(file, SAMPLE_HYPR_CONF)
+  upsertWindowRule({ file, format: 'conf', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+
+  const result = removeWindowRule({ file, format: 'conf' })
+  assert.equal(result.changed, true)
+  assert.equal(fs.readFileSync(file, 'utf8'), SAMPLE_HYPR_CONF, '移除后应当和原始内容完全一致')
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('lua：追加与移除同样保留用户内容', () => {
+  const dir = makeSandbox('hypr-lua-roundtrip')
+  const file = path.join(dir, 'hyprland.lua')
+  fs.writeFileSync(file, SAMPLE_HYPR_LUA)
+
+  upsertWindowRule({ file, format: 'lua', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
+  const added = fs.readFileSync(file, 'utf8')
+  assert.ok(added.includes('my-kitty-rule'), '用户规则必须保留')
+  assert.ok(added.includes('hl.window_rule({'))
+  assert.equal(hasWindowRule({ file, format: 'lua' }), true)
+
+  const result = removeWindowRule({ file, format: 'lua' })
+  assert.equal(result.changed, true)
+  assert.equal(fs.readFileSync(file, 'utf8'), SAMPLE_HYPR_LUA)
+  assert.equal(hasWindowRule({ file, format: 'lua' }), false)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('标记块不完整时不误删（宁可不动）', () => {
+  const dir = makeSandbox('hypr-broken-mark')
+  const file = path.join(dir, 'hyprland.conf')
+  const broken = `monitor = , preferred, auto, 1\n# dsh-desktop begin\nwindowrule = match:class ^(x)$, float on, size 1 1\n`
+  fs.writeFileSync(file, broken)
+  const result = removeWindowRule({ file, format: 'conf' })
+  assert.equal(result.changed, false, '只有 begin 没有 end，应当拒绝删除')
+  assert.equal(fs.readFileSync(file, 'utf8'), broken, '文件必须保持原样')
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('文件不存在时 remove / hasWindowRule 安全返回', () => {
+  const dir = makeSandbox('hypr-missing')
+  const file = path.join(dir, 'nope.conf')
+  assert.equal(removeWindowRule({ file, format: 'conf' }).changed, false)
+  assert.equal(hasWindowRule({ file, format: 'conf' }), false)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+// ---------------------------------------------------------------------------
+section('Hyprland 接入 installer：四道安全闸')
+// ---------------------------------------------------------------------------
+
+/**
+ * 假的 exec：替掉对真实 Hyprland / hyprctl 的调用。
+ *
+ * CI runner 上没有 Hyprland，这些用例必须能在任何机器上跑；而这里要验证的
+ * 本来也不是「Hyprland 怎么回答」，而是「我们拿到各种回答之后**做不做事**」。
+ */
+function fakeHyprExec({ version = '0.56.2', verifyOk = true, versionFails = false } = {}) {
+  const calls = []
+  const exec = (cmd, args) => {
+    calls.push([cmd, ...args].join(' '))
+    if (cmd === 'Hyprland' && args.includes('--version-json')) {
+      if (versionFails) throw new Error('Hyprland: command not found')
+      return JSON.stringify({ version, branch: `v${version}` })
+    }
+    if (cmd === 'Hyprland' && args.includes('--verify-config')) {
+      if (verifyOk) return 'config ok'
+      const error = new Error('verify failed')
+      error.stdout = 'Config error in file /tmp/x at line 1: windowrule is bogus'
+      throw error
+    }
+    if (cmd === 'hyprctl') return 'ok'
+    throw new Error(`unexpected exec: ${cmd}`)
+  }
+  return { exec, calls }
+}
+
+/** 搭一个「桌面环境是 Hyprland」的安装沙箱，返回相关句柄。 */
+function makeHyprInstallSandbox(name, { format = 'conf', manage = true } = {}) {
+  const dir = makeSandbox(name)
+  const paths = resolvePaths({ HOME: dir, DSH_DESKTOP_ROOT: dir })
+  const toolchain = makeFakeToolchain()
+  const env = {
+    ...process.env,
+    DSH_DESKTOP_ROOT: dir,
+    PATH: toolchain.pathValue,
+    XDG_CURRENT_DESKTOP: 'Hyprland',
+    WAYLAND_DISPLAY: 'wayland-1',
+  }
+  const file = format === 'lua' ? paths.hyprlandLuaFile : paths.hyprlandConfFile
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, format === 'lua' ? SAMPLE_HYPR_LUA : SAMPLE_HYPR_CONF)
+  const config = { ...defaultConfig(), manageHyprlandRules: manage }
+  return { dir, paths, env, file, config, format }
+}
+
+const stepOf = (result, id) => result.steps.find((step) => step.id === id)
+
+await test('关闭开关时：什么都不写（默认平铺）', () => {
+  const box = makeHyprInstallSandbox('hypr-off', { manage: false })
+  const { exec, calls } = fakeHyprExec()
+  const before = fs.readFileSync(box.file, 'utf8')
+
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'skipped')
+  assert.equal(fs.readFileSync(box.file, 'utf8'), before, '关闭时配置文件必须一字不动')
+  assert.equal(calls.filter((c) => c.includes('--version-json')).length, 0, '关闭时不该去探测版本')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('非 Hyprland 桌面：跳过而不是乱写', () => {
+  const box = makeHyprInstallSandbox('hypr-otherde')
+  const before = fs.readFileSync(box.file, 'utf8')
+  const result = install({
+    paths: box.paths,
+    env: { ...box.env, XDG_CURRENT_DESKTOP: 'KDE' },
+    config: box.config,
+    quiet: true,
+    exec: fakeHyprExec().exec,
+  })
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'skipped')
+  assert.equal(fs.readFileSync(box.file, 'utf8'), before)
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('没有配置文件时：跳过（不替用户抢先创建，否则会顶掉 Hyprland 默认配置）', () => {
+  const dir = makeSandbox('hypr-noconf')
+  const paths = resolvePaths({ HOME: dir, DSH_DESKTOP_ROOT: dir })
+  const toolchain = makeFakeToolchain()
+  const env = {
+    ...process.env,
+    DSH_DESKTOP_ROOT: dir,
+    PATH: toolchain.pathValue,
+    XDG_CURRENT_DESKTOP: 'Hyprland',
+    WAYLAND_DISPLAY: 'wayland-1',
+  }
+
+  const result = install({
+    paths,
+    env,
+    config: { ...defaultConfig(), manageHyprlandRules: true },
+    quiet: true,
+    exec: fakeHyprExec().exec,
+  })
+
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'skipped')
+  assert.equal(fs.existsSync(paths.hyprlandLuaFile), false, '绝不能替用户创建 hyprland.lua')
+  assert.equal(fs.existsSync(paths.hyprlandConfFile), false, '绝不能替用户创建 hyprland.conf')
+  assert.ok(
+    result.warnings.some((w) => w.includes('先启动一次 Hyprland')),
+    '应当给出可操作的提示',
+  )
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+await test('版本低于 0.53：跳过，不写没实测过的老语法', () => {
+  const box = makeHyprInstallSandbox('hypr-oldver')
+  const before = fs.readFileSync(box.file, 'utf8')
+  const { exec } = fakeHyprExec({ version: '0.52.2' })
+
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'skipped')
+  assert.match(stepOf(result, 'hyprland-rule').detail, /0\.52\.2/)
+  assert.equal(fs.readFileSync(box.file, 'utf8'), before, '版本不支持时绝不能碰配置')
+  assert.ok(result.warnings.some((w) => w.includes('版本过低')))
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('读不出版本：跳过（宁可不动，也不赌）', () => {
+  const box = makeHyprInstallSandbox('hypr-nover')
+  const before = fs.readFileSync(box.file, 'utf8')
+  const result = install({
+    paths: box.paths,
+    env: box.env,
+    config: box.config,
+    quiet: true,
+    exec: fakeHyprExec({ versionFails: true }).exec,
+  })
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'skipped')
+  assert.equal(fs.readFileSync(box.file, 'utf8'), before)
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('--verify-config 不过：一个字都不写（Hyprland 配置错会拒绝启动）', () => {
+  const box = makeHyprInstallSandbox('hypr-verifyfail')
+  const before = fs.readFileSync(box.file, 'utf8')
+  const { exec } = fakeHyprExec({ verifyOk: false })
+
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'failed')
+  assert.match(stepOf(result, 'hyprland-rule').detail, /未通过 Hyprland 校验/)
+  assert.equal(fs.readFileSync(box.file, 'utf8'), before, '校验失败时配置必须保持原样')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('全部条件满足：写入规则，且先校验后落盘', () => {
+  const box = makeHyprInstallSandbox('hypr-happy')
+  const { exec, calls } = fakeHyprExec()
+
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec })
+
+  const step = stepOf(result, 'hyprland-rule')
+  assert.equal(step.status, 'updated')
+  assert.ok(step.detail.includes('1200x750'))
+  assert.ok(step.detail.includes('强制浮动'))
+
+  const after = fs.readFileSync(box.file, 'utf8')
+  assert.ok(after.includes(MARK_BEGIN))
+  assert.match(after, /windowrule = match:class .*float on, size 1200 750/)
+  assert.ok(after.includes('my-kitty') || after.includes('# 我自己写的规则'), '用户内容必须保留')
+
+  // 校验必须发生在写入之前。
+  const verifyAt = calls.findIndex((c) => c.includes('--verify-config'))
+  assert.ok(verifyAt >= 0, '必须调用过 --verify-config')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('lua 配置：写入 lua 语法而不是 hyprlang', () => {
+  const box = makeHyprInstallSandbox('hypr-lua-install', { format: 'lua' })
+  const result = install({
+    paths: box.paths,
+    env: box.env,
+    config: box.config,
+    quiet: true,
+    exec: fakeHyprExec().exec,
+  })
+
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'updated')
+  const after = fs.readFileSync(box.file, 'utf8')
+  assert.ok(after.includes('hl.window_rule({'))
+  assert.ok(after.includes('float = true,'))
+  assert.ok(!after.includes('windowrule = match:class'), 'lua 配置里不能出现 hyprlang 语法')
+  assert.ok(after.includes('my-kitty-rule'), '用户内容必须保留')
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('重复安装幂等：第二次不再改动文件', () => {
+  const box = makeHyprInstallSandbox('hypr-reinstall')
+  install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec: fakeHyprExec().exec })
+  const first = fs.readFileSync(box.file, 'utf8')
+
+  const result = install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec: fakeHyprExec().exec })
+  assert.equal(stepOf(result, 'hyprland-rule').status, 'unchanged')
+  assert.equal(fs.readFileSync(box.file, 'utf8'), first)
+  fs.rmSync(box.dir, { recursive: true, force: true })
+})
+
+await test('卸载：只删我们的块，用户配置复原', () => {
+  const box = makeHyprInstallSandbox('hypr-uninstall')
+  install({ paths: box.paths, env: box.env, config: box.config, quiet: true, exec: fakeHyprExec().exec })
+  assert.notEqual(fs.readFileSync(box.file, 'utf8'), SAMPLE_HYPR_CONF)
+
+  uninstall({ paths: box.paths, env: box.env })
+  assert.equal(fs.readFileSync(box.file, 'utf8'), SAMPLE_HYPR_CONF, '卸载后应完全复原')
+  fs.rmSync(box.dir, { recursive: true, force: true })
 })
 
 // ---------------------------------------------------------------------------
