@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { connectHost, defaultConfig, normalizeConfig, readConfig, writeConfig } from './config.js'
 import { detectDesktopEnvironment, findExecutable, isLinux, resolveBrowser } from './detect.js'
 import { aliasEntryFilename, aliasIconName, chromiumAppId, escapeExecArg, renderAliasEntry, renderDesktopEntry } from './desktop-entry.js'
+import { inspectGnomeWindowSize } from './gnome.js'
 import { reconfigureKwin, removeSizeRule, upsertSizeRule } from './kwin.js'
 import {
   MIN_MODERN_VERSION,
@@ -472,6 +473,20 @@ export function install(options = {}) {
   // ---- Hyprland 窗口规则（仅 Hyprland） ----------------------------------
   applyHyprlandRule({ config, desktop, paths, appId, env, exec, record, warnings })
 
+  // ---- GNOME 尺寸现实检查（仅 GNOME，**只读**） --------------------------
+  // GNOME 既没有窗口规则配置文件也没有对应的 dconf 键，所以这里不写任何东西。
+  // 它本来就遵循 --window-size，唯一的例外是 auto-maximize 会在大窗口上接管。
+  if (desktop.id === 'gnome') {
+    try {
+      const { assessment } = inspectGnomeWindowSize({ env, exec, size: config.window })
+      record('gnome-window-size', assessment.level === 'warning' ? 'warning' : 'info', assessment.message)
+      // warnings 会进插件启动日志，所以放「动作」而不是重复一遍「发现」。
+      if (assessment.advice) warnings.push(assessment.advice)
+    } catch (error) {
+      record('gnome-window-size', 'failed', error.message)
+    }
+  }
+
   // ---- 刷新缓存 ---------------------------------------------------------
   if (!options.quiet) {
     runRefresh('update-desktop-database', [paths.applicationsDir], warnings)
@@ -700,6 +715,8 @@ export function uninstall(options = {}) {
 export function status(options = {}) {
   const env = options.env ?? process.env
   const paths = options.paths ?? resolvePaths(env)
+  // 注入点：测试里替换掉对 gdctl / gsettings 的真实调用。
+  const exec = options.exec ?? execFileSync
   const desktop = detectDesktopEnvironment(env)
   const read = readConfig(paths)
   const config = read.config
@@ -771,6 +788,17 @@ export function status(options = {}) {
     }
   } else if (desktop.id === 'hyprland') {
     check('hyprland-rule', true, '未托管 Hyprland 规则：窗口遵循平铺布局，宽高设置不生效', 'info')
+  }
+
+  // GNOME：没有规则可查，只有「这个尺寸会不会被 auto-maximize 吃掉」这一个现实问题。
+  if (desktop.id === 'gnome') {
+    try {
+      const { assessment } = inspectGnomeWindowSize({ env, exec, size: config.window })
+      const bad = assessment.level === 'warning'
+      check('gnome-window-size', !bad, assessment.message, bad ? 'warning' : 'info')
+    } catch (error) {
+      check('gnome-window-size', false, error.message, 'warning')
+    }
   }
 
   check(

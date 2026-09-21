@@ -141,6 +141,7 @@ function printSteps(steps, p, out) {
     removed: p.yellow('－ 已移除'),
     failed: p.red('✗ 失败'),
     info: p.dim('· 说明'),
+    warning: p.yellow('! 注意'),
   }
   for (const step of steps) {
     const label = icon[step.status] ?? step.status
@@ -488,6 +489,13 @@ function buildAdvice(report, paths) {
   }
   if (byId['kwin-rule'] && !byId['kwin-rule'].ok) {
     advice.push('KWin 窗口规则缺失：窗口可能在高分屏下纵向拉满。运行 dsh-desktop install --force 重建。')
+  }
+  if (byId['gnome-window-size'] && !byId['gnome-window-size'].ok) {
+    advice.push(
+      'GNOME 会把这个尺寸的窗口自动最大化，上面的宽高设置将不生效。两个办法：' +
+        '把窗口宽高调小到逻辑工作区的 80% 以下；或执行 gsettings set org.gnome.mutter auto-maximize false ' +
+        '（注意这是**全局**设置，会影响所有应用的窗口最大化行为，且可用 gsettings reset 还原）。',
+    )
   }
   if (byId['desktop-session'] && !byId['desktop-session'].ok) {
     advice.push('当前没有图形会话 —— 桌面集成只能在登录桌面后生效。')
