@@ -1,16 +1,16 @@
 # dsh-linux-desktop
 
-> 让 DeepSeek Harness 在 Linux 桌面上像一个原生应用：从程序启动器点开、独立无边框窗口、关掉窗口后台服务自动停止。
+> 让 DeepSeek Harness 在 Linux 桌面上像一个原生应用：从程序启动器点开、独立无边框窗口，以及由它启动的服务随窗口关闭而停止。
 
 这是一个 DSH bundle。它复用系统已有的 Chromium 系浏览器，用标准 XDG 桌面入口把 `dsh web` 接入桌面环境，并且不修改 `dsh web` 自身的行为。
 
-**分发状态**：本仓库当前为私有，npm 上的包已下架。安装方式见下文。
+**分发状态**：尚未发布到 npm。当前安装方式见下文。
 
 ---
 
 ## 它做什么
 
-`dsh web` 提供完整的 Web 界面，但它在 Linux 桌面上有三处不便：没有独立的任务栏与 Alt-Tab 条目；服务生命周期依附于终端；社区的桌面类插件面向 Windows 与 macOS，没有面向 Linux XDG 桌面入口的实现。
+`dsh web` 提供完整的 Web 界面，但它在 Linux 桌面上有三处不便：没有独立的任务栏与 Alt-Tab 条目；服务生命周期依附于终端；社区的桌面类插件主要面向 Windows 与 macOS，截至 2026 年 9 月尚未见到面向 Linux XDG 桌面入口的实现（如有遗漏，欢迎指正）。
 
 本插件补齐这三处。它做五件事：
 
@@ -39,7 +39,7 @@ dsh plugin --profile web add /path/to/dsh-linux-desktop
 
 安装后重启一次 `dsh web`。
 
-> **为什么只有这一种方式**：npm 上的 `dsh-linux-desktop` 已下架，本仓库为私有，因此 `add dsh-linux-desktop`（按包名）与 `add github:ffyfox/dsh-linux-desktop` 对其他人不可用。
+> **为什么只有这一种方式**：尚未发布到 npm，因此 `add dsh-linux-desktop`（按包名）暂不可用。
 >
 > 本地检出方式在隔离的 `DSH_HOME` 中实测通过。本插件是纯 ESM JavaScript，没有构建步骤，所以从任何来源安装都不需要给 pnpm 授予 `allowBuilds` 权限。
 
@@ -182,9 +182,9 @@ dsh plugin --profile web exec dsh-desktop doctor
 
 ## 开发
 
+在仓库根目录执行：
+
 ```bash
-git clone https://github.com/ffyfox/dsh-linux-desktop.git
-cd dsh-linux-desktop
 node test/smoke.mjs                                   # 冒烟测试，72 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物

@@ -24,7 +24,7 @@ src/
   kwin.js           kwinrulesrc 安全读写
   runtime.js        运行时状态发布
   server.js         端口探测 / 进程校验 / 启停
-  assets/           图标 SVG + 启动器 bash 模板
+  assets/           图标位图 whale-girl.png + 启动器 bash 模板
 bin/dsh-desktop.js  CLI 可执行入口
 scripts/            发布前校验
 test/smoke.mjs      冒烟测试

@@ -1,16 +1,16 @@
 # dsh-linux-desktop
 
-> Make DeepSeek Harness feel like a native application on Linux: launch it from your app launcher, get a chromeless standalone window, and have the background server stop when you close it.
+> Make DeepSeek Harness feel like a native application on Linux: launch it from your app launcher, get a chromeless standalone window, and have the service it started stop when you close the window.
 
 This is a DSH bundle. It reuses the Chromium-family browser already installed on your system, wires `dsh web` into the desktop through standard XDG desktop entries, and does not change the behaviour of `dsh web` itself.
 
-**Distribution status**: this repository is currently private and the npm package has been unpublished. See below for how to install.
+**Distribution status**: not yet published to npm. See below for how to install.
 
 ---
 
 ## What it does
 
-`dsh web` provides a complete web interface, but on a Linux desktop it has three rough edges: no dedicated taskbar or Alt-Tab entry; a service lifetime tied to a terminal; and a community of desktop plugins that targets Windows and macOS, with nothing for Linux XDG desktop entries.
+`dsh web` provides a complete web interface, but on a Linux desktop it has three rough edges: no dedicated taskbar or Alt-Tab entry; a service lifetime tied to a terminal; and desktop plugins in the community that mainly target Windows and macOS — as of September 2026 we have not seen one built around Linux XDG desktop entries (corrections welcome).
 
 This plugin addresses all three. It does five things:
 
@@ -39,7 +39,7 @@ dsh plugin --profile web add /path/to/dsh-linux-desktop
 
 Restart `dsh web` once after installing.
 
-> **Why this is the only method**: the npm package `dsh-linux-desktop` has been unpublished and this repository is private, so `add dsh-linux-desktop` (by package name) and `add github:ffyfox/dsh-linux-desktop` are not available to anyone else.
+> **Why this is the only method**: the package is not published to npm yet, so `add dsh-linux-desktop` (by package name) is not available.
 >
 > The local-checkout method was verified in an isolated `DSH_HOME`. This plugin is plain ESM JavaScript with no build step, so installing it from any source does not require granting pnpm an `allowBuilds` permission.
 
@@ -183,9 +183,9 @@ dsh plugin --profile web exec dsh-desktop doctor
 
 ## Development
 
+Run these from the repository root:
+
 ```bash
-git clone https://github.com/ffyfox/dsh-linux-desktop.git
-cd dsh-linux-desktop
 node test/smoke.mjs                                   # smoke tests, 72 checks, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
