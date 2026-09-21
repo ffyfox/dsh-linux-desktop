@@ -43,6 +43,7 @@ install 选项：
   --browser <id|路径>    指定浏览器：auto/chrome/chromium/brave/edge/vivaldi/opera
   --profile-mode <模式>  dedicated（默认，关窗即停服务）或 shared（复用现有浏览器配置）
   --no-kwin              不托管 KWin 窗口规则
+  --hyprland             托管 Hyprland 窗口规则（强制该窗口浮动并使用 --size 尺寸）
   --no-auto-install      关闭「dsh web 启动时自动安装」
 
 通用选项：
@@ -122,6 +123,8 @@ function applyFlagOverrides(config, flags, warnings) {
     else next.window = { width: Number(match[1]), height: Number(match[2]) }
   }
   if (flags['no-kwin'] !== undefined) next.manageKwinRules = false
+  // Hyprland 默认**不**托管（平铺 WM 不该被插件擅自改成浮动），所以要显式打开。
+  if (flags.hyprland !== undefined) next.manageHyprlandRules = true
   if (flags['no-auto-install'] !== undefined) next.autoInstall = false
 
   return normalizeConfig(next).config
@@ -307,7 +310,7 @@ export async function run(argv, io = {}) {
           return 2
         }
         raw.window = { width: Number(match[1]), height: Number(match[2]) }
-      } else if (['autoInstall', 'manageKwinRules', 'terminalAction'].includes(key)) {
+      } else if (['autoInstall', 'manageKwinRules', 'manageHyprlandRules', 'terminalAction'].includes(key)) {
         raw[key] = value === 'true' || value === '1' || value === 'yes'
       } else if (key === 'port') {
         raw.port = Number.parseInt(value, 10)

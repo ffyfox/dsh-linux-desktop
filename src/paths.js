@@ -78,6 +78,7 @@ export const CLI_SHIM_FILENAME = 'dsh-desktop'
  *   chromeProfileDir: string,
  *   runtimeDir: string, runtimeEnvFile: string, runtimeJsonFile: string,
  *   logFile: string, backupsDir: string, kwinRulesFile: string,
+ *   hyprlandConfFile: string, hyprlandLuaFile: string,
  * }}
  */
 export function resolvePaths(env = process.env) {
@@ -141,5 +142,10 @@ export function resolvePaths(env = process.env) {
     backupsDir: path.join(configDir, 'backups'),
 
     kwinRulesFile: path.join(xdgConfigHome, 'kwinrulesrc'),
+
+    // Hyprland 两套配置格式并存：0.56 起全新安装生成 hyprland.lua（Lua 语法），
+    // 老用户升级上来的仍是 hyprland.conf（hyprlang 语法）。同时存在时 .lua 优先。
+    hyprlandConfFile: path.join(xdgConfigHome, 'hypr', 'hyprland.conf'),
+    hyprlandLuaFile: path.join(xdgConfigHome, 'hypr', 'hyprland.lua'),
   }
 }

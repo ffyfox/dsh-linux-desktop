@@ -168,6 +168,8 @@ window.__ModuleLoader__.load({
       autoInstallHint: '每次 dsh web 启动时把桌面入口、图标与 KWin 规则同步到当前版本。',
       manageKwinRulesLabel: '托管 KWin 窗口规则',
       manageKwinRulesHint: '仅 KDE Plasma 生效，用于把窗口调成上面的尺寸。',
+      manageHyprlandRulesLabel: '托管 Hyprland 窗口规则',
+      manageHyprlandRulesHint: '仅 Hyprland 生效。默认关闭 —— 此时窗口遵循平铺布局，上面的宽高设置不起作用；开启后会强制该窗口浮动并使用上面的尺寸。',
       terminalActionLabel: '「以终端界面运行」右键动作',
       terminalActionHint: '在桌面入口的右键菜单里附带一个用终端启动 dsh-tui 的动作。',
       terminalCommandLabel: '终端命令',
@@ -202,6 +204,8 @@ window.__ModuleLoader__.load({
       autoInstallHint: 'Sync the desktop entry, icons, and KWin rule to the current version on every dsh web start.',
       manageKwinRulesLabel: 'Manage the KWin window rule',
       manageKwinRulesHint: 'KDE Plasma only; sizes the window to the values above.',
+      manageHyprlandRulesLabel: 'Manage the Hyprland window rule',
+      manageHyprlandRulesHint: 'Hyprland only. Off by default — the window then follows the tiling layout and the size above has no effect; turning it on forces this window to float at the size above.',
       terminalActionLabel: '"Open in Terminal" action',
       terminalActionHint: 'Adds a right-click action that launches dsh-tui in a terminal.',
       terminalCommandLabel: 'Terminal command',
@@ -229,6 +233,7 @@ window.__ModuleLoader__.load({
       { ns: 'window', drafts: ['windowWidth', 'windowHeight'] },
       { ns: 'autoInstall', drafts: ['autoInstall'] },
       { ns: 'manageKwinRules', drafts: ['manageKwinRules'] },
+      { ns: 'manageHyprlandRules', drafts: ['manageHyprlandRules'] },
       { ns: 'terminalAction', drafts: ['terminalAction'] },
       { ns: 'terminalCommand', drafts: ['terminalCommand'] },
     ]
@@ -253,6 +258,7 @@ window.__ModuleLoader__.load({
       { draft: 'windowHeight', kind: 'size', labelKey: 'windowHeightLabel' },
       { draft: 'autoInstall', kind: 'boolean', labelKey: 'autoInstallLabel', hintKey: 'autoInstallHint' },
       { draft: 'manageKwinRules', kind: 'boolean', labelKey: 'manageKwinRulesLabel', hintKey: 'manageKwinRulesHint' },
+      { draft: 'manageHyprlandRules', kind: 'boolean', labelKey: 'manageHyprlandRulesLabel', hintKey: 'manageHyprlandRulesHint' },
       { draft: 'terminalAction', kind: 'boolean', labelKey: 'terminalActionLabel', hintKey: 'terminalActionHint' },
       { draft: 'terminalCommand', kind: 'text', labelKey: 'terminalCommandLabel', hintKey: 'terminalCommandHint' },
     ]

@@ -395,6 +395,7 @@ await test('schema 用真的 schemastery 构造时默认值与校验都对', asy
     window: { width: 1200, height: 750 },
     autoInstall: true,
     manageKwinRules: true,
+    manageHyprlandRules: false,
     terminalAction: true,
     terminalCommand: '',
   })

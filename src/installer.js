@@ -21,6 +21,18 @@ import { connectHost, defaultConfig, normalizeConfig, readConfig, writeConfig } 
 import { detectDesktopEnvironment, findExecutable, isLinux, resolveBrowser } from './detect.js'
 import { aliasEntryFilename, aliasIconName, chromiumAppId, escapeExecArg, renderAliasEntry, renderDesktopEntry } from './desktop-entry.js'
 import { reconfigureKwin, removeSizeRule, upsertSizeRule } from './kwin.js'
+import {
+  MIN_MODERN_VERSION,
+  buildRuleBlock,
+  detectConfigFile,
+  detectHyprlandVersion,
+  hasWindowRule,
+  reloadHyprland,
+  removeWindowRule,
+  upsertWindowRule,
+  verifyRuleBlock,
+  versionAtLeast,
+} from './hyprland.js'
 import { ICON_NAME, ICON_SIZES, iconDirFor, iconFileFor, resolvePaths } from './paths.js'
 import { inspectRuntime } from './runtime.js'
 
@@ -227,6 +239,8 @@ export function install(options = {}) {
   const env = options.env ?? process.env
   const paths = options.paths ?? resolvePaths(env)
   const version = pluginVersion()
+  // 注入点：测试里替换掉对 Hyprland / hyprctl 的真实调用。
+  const exec = options.exec ?? execFileSync
 
   /** @type {Array<{ id: string, status: string, detail: string }>} */
   const steps = []
@@ -455,6 +469,9 @@ export function install(options = {}) {
     record('kwin-rule', 'skipped', '配置中已关闭 manageKwinRules')
   }
 
+  // ---- Hyprland 窗口规则（仅 Hyprland） ----------------------------------
+  applyHyprlandRule({ config, desktop, paths, appId, env, exec, record, warnings })
+
   // ---- 刷新缓存 ---------------------------------------------------------
   if (!options.quiet) {
     runRefresh('update-desktop-database', [paths.applicationsDir], warnings)
@@ -472,6 +489,80 @@ export function install(options = {}) {
 
   const changed = steps.some((step) => step.status === 'created' || step.status === 'updated')
   return { ok: true, steps, warnings, changed, appId, browser, paths }
+}
+
+/**
+ * 写入 Hyprland 窗口规则。
+ *
+ * 这里的每一步都在贯彻同一条原则：**宁可什么都不写，也绝不写坏用户的配置。**
+ * Hyprland 遇到配置错误会直接拒绝启动（`--verify-config` 退出码 1），而用户的
+ * 整个桌面都挂在那个配置上。所以下面有足足四道闸：
+ *
+ *   1. 配置文件不存在 → 跳过（替用户抢先创建会让它失去 Hyprland 自带的默认配置）
+ *   2. 版本读不出来 → 跳过
+ *   3. 版本低于 0.53 → 跳过（老语法没实测过，不拿用户的配置冒险）
+ *   4. `--verify-config` 校验不过 → 跳过
+ *
+ * 任何一道没过都只记录 + 警告，绝不落盘。
+ */
+function applyHyprlandRule({ config, desktop, paths, appId, env, exec, record, warnings }) {
+  if (!config.manageHyprlandRules) {
+    record('hyprland-rule', 'skipped', '配置中已关闭 manageHyprlandRules（Hyprland 默认保持平铺）')
+    return
+  }
+  if (desktop.id !== 'hyprland') {
+    record('hyprland-rule', 'skipped', `当前桌面环境是 ${desktop.label}，不适用 Hyprland 规则`)
+    return
+  }
+
+  try {
+    const found = detectConfigFile({ confFile: paths.hyprlandConfFile, luaFile: paths.hyprlandLuaFile })
+    if (!found.file) {
+      record('hyprland-rule', 'skipped', '尚未生成 Hyprland 配置（先运行一次 Hyprland 再安装），未做任何改动')
+      warnings.push('未找到 Hyprland 配置文件，窗口尺寸规则已跳过。请先启动一次 Hyprland 生成默认配置。')
+      return
+    }
+
+    const ver = detectHyprlandVersion({ env, exec })
+    if (!ver.ok) {
+      record('hyprland-rule', 'skipped', `无法确定 Hyprland 版本（${ver.reason}），为避免写坏配置已跳过`)
+      warnings.push(`无法确定 Hyprland 版本，窗口尺寸规则已跳过：${ver.reason}`)
+      return
+    }
+    if (!versionAtLeast(ver.version, MIN_MODERN_VERSION)) {
+      const v = ver.version.join('.')
+      record('hyprland-rule', 'skipped', `Hyprland ${v} 低于 ${MIN_MODERN_VERSION.join('.')}，本插件只写 match:class 新语法`)
+      warnings.push(`Hyprland ${v} 版本过低，窗口尺寸规则已跳过（需要 ${MIN_MODERN_VERSION.join('.')} 及以上）。`)
+      return
+    }
+
+    const block = buildRuleBlock({ format: found.format, appId, size: config.window })
+    const verify = verifyRuleBlock({ format: found.format, block, env, exec })
+    if (!verify.ok) {
+      record('hyprland-rule', 'failed', `规则未通过 Hyprland 校验，已放弃写入：${verify.error}`)
+      warnings.push(`Hyprland 窗口规则未通过校验，未做任何改动：${verify.error}`)
+      return
+    }
+
+    const result = upsertWindowRule({ file: found.file, format: found.format, appId, size: config.window })
+    record(
+      'hyprland-rule',
+      result.changed ? 'updated' : 'unchanged',
+      `${found.file}（${found.format}）${config.window.width}x${config.window.height}，强制浮动` +
+        (result.backupPath ? `（备份：${result.backupPath}）` : ''),
+    )
+    if (result.changed) {
+      const reload = reloadHyprland({ env, exec })
+      record(
+        'hyprland-reload',
+        reload.ok ? 'ok' : 'skipped',
+        reload.ok ? '已通过 hyprctl reload 生效' : '不在 Hyprland 会话内或缺少 hyprctl，规则将在下次登录生效',
+      )
+    }
+  } catch (error) {
+    record('hyprland-rule', 'failed', error.message)
+    warnings.push(`Hyprland 规则写入失败：${error.message}`)
+  }
 }
 
 /** 极简模板渲染：把 `@@KEY@@` 换成值，并拒绝未替换的占位符。 */
@@ -568,6 +659,26 @@ export function uninstall(options = {}) {
     warnings.push(`KWin 规则清理失败：${error.message}`)
   }
 
+  // Hyprland 规则：只删我们自己那块内联内容，用户其余配置一字不动。
+  try {
+    const found = detectConfigFile({ confFile: paths.hyprlandConfFile, luaFile: paths.hyprlandLuaFile })
+    if (!found.file) {
+      steps.push({ id: 'hyprland-rule', status: 'absent', detail: '未找到 Hyprland 配置文件' })
+    } else {
+      const result = removeWindowRule({ file: found.file, format: found.format })
+      if (result.changed) {
+        removed.push(found.file)
+        steps.push({ id: 'hyprland-rule', status: 'removed', detail: found.file })
+        reloadHyprland({ env, exec: options.exec ?? execFileSync })
+      } else {
+        steps.push({ id: 'hyprland-rule', status: 'absent', detail: '未找到本插件写入的规则' })
+      }
+    }
+  } catch (error) {
+    steps.push({ id: 'hyprland-rule', status: 'failed', detail: error.message })
+    warnings.push(`Hyprland 规则清理失败：${error.message}`)
+  }
+
   runRefresh('update-desktop-database', [paths.applicationsDir], warnings)
   if (desktop.id === 'kde') runRefresh('kbuildsycoca6', ['--noincremental'], warnings)
 
@@ -643,6 +754,23 @@ export function status(options = {}) {
       ruleDetail = `无法读取 ${paths.kwinRulesFile}`
     }
     check('kwin-rule', ruleOk, ruleDetail, 'warning')
+  }
+
+  if (config.manageHyprlandRules && desktop.id === 'hyprland') {
+    const found = detectConfigFile({ confFile: paths.hyprlandConfFile, luaFile: paths.hyprlandLuaFile })
+    if (!found.file) {
+      check('hyprland-rule', false, '尚未生成 Hyprland 配置（先运行一次 Hyprland）', 'warning')
+    } else {
+      const ok = hasWindowRule({ file: found.file, format: found.format })
+      check(
+        'hyprland-rule',
+        ok,
+        ok ? `已在 ${found.file} 中注册（${found.format}）` : `未在 ${found.file} 中找到本插件写入的规则`,
+        'warning',
+      )
+    }
+  } else if (desktop.id === 'hyprland') {
+    check('hyprland-rule', true, '未托管 Hyprland 规则：窗口遵循平铺布局，宽高设置不生效', 'info')
   }
 
   check(

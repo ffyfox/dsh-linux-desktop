@@ -51,6 +51,16 @@ export function defaultConfig() {
     /** 是否托管 KWin 窗口规则（仅 KDE Plasma 生效）。 */
     manageKwinRules: true,
 
+    /**
+     * 是否托管 Hyprland 窗口规则（仅 Hyprland 生效）。
+     *
+     * 默认 **关闭**，与 KDE 相反 —— 这是刻意的：Hyprland 是平铺合成器，用户
+     * 选它就是要平铺。实测在平铺下窗口会铺满工作区，浏览器传的 `--window-size`
+     * 和我们的 `size` 规则都会被忽略；要兑现上面那两个宽高，必须强制窗口浮动。
+     * 与其擅自改掉别人的窗口行为，不如默认什么都不写，让想要的人自己打开。
+     */
+    manageHyprlandRules: false,
+
     /** 桌面入口显示名。 */
     desktopName: 'DeepSeek Harness',
     /** 桌面入口的中文名（zh_CN 语境下覆盖 desktopName）。 */
@@ -116,7 +126,7 @@ export function normalizeConfig(raw) {
     warnings.push("profileMode 只能是 'dedicated' 或 'shared'，已使用 dedicated")
   }
 
-  for (const flag of ['autoInstall', 'manageKwinRules', 'terminalAction']) {
+  for (const flag of ['autoInstall', 'manageKwinRules', 'manageHyprlandRules', 'terminalAction']) {
     if (typeof input[flag] === 'boolean') config[flag] = input[flag]
     else if (input[flag] !== undefined) warnings.push(`${flag} 必须是布尔值，已使用默认值 ${defaults[flag]}`)
   }

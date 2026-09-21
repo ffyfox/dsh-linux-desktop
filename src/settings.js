@@ -50,6 +50,7 @@ export const SETTINGS_FIELDS = [
   'window',
   'autoInstall',
   'manageKwinRules',
+  'manageHyprlandRules',
   'terminalAction',
   'terminalCommand',
 ]
@@ -75,6 +76,9 @@ export function createSettingsSchema(z) {
     }),
     autoInstall: z.boolean().default(true),
     manageKwinRules: z.boolean().default(true),
+    // 默认 false 与 KDE 相反：Hyprland 是平铺合成器，用户选它就是要平铺，
+    // 不该被插件擅自改成浮动。想要固定尺寸的人自己打开。
+    manageHyprlandRules: z.boolean().default(false),
     terminalAction: z.boolean().default(true),
     terminalCommand: z.string().default(''),
   })
