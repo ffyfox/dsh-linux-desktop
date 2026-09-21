@@ -1,6 +1,6 @@
 {
   "name": "dsh-linux-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "DeepSeek Harness 的 Linux 原生桌面集成：XDG 桌面入口、纯净无边框独立窗口，以及由自己启动的服务随窗口关闭而停止的生命周期管理。",
   "type": "module",
   "license": "MIT",

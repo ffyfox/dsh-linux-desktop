@@ -3,6 +3,32 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.3.0] - 未发布
+
+加入 Hyprland 支持。默认保持平铺，需要固定窗口尺寸的用户可以显式打开。
+
+### 新增
+
+- **Hyprland 窗口尺寸规则**（`src/hyprland.js`）
+  - 新增配置项 `manageHyprlandRules`，**默认 `false`**；设置页新增「托管 Hyprland 窗口规则」开关，CLI 新增 `--hyprland`。
+  - 打开后把窗口规则内联进 Hyprland 配置，强制该窗口浮动并使用 `window` 里的宽高；关闭时窗口遵循平铺布局，宽高设置不生效。
+
+### 变更
+
+- **桌面环境兼容性**：Hyprland 从「预期可用但未验证」升级为「部分验证」（app_id 推导与窗口尺寸规则已实测）。
+
+### 实测结论（Hyprland 0.56.2，嵌套会话）
+
+- **平铺会吞掉一切尺寸。** 不写规则时窗口铺满工作区，浏览器传的 `--window-size` 被完全忽略；`size` 规则**只对浮动窗口有效**，必须同时给 `float`，否则静默失效。
+- **配置有两套格式。** 0.56 起全新安装生成 `hyprland.lua`（Lua 语法），老用户升级上来的仍是 `hyprland.conf`（hyprlang 语法）；两者同时存在时 **`.lua` 优先**。
+- **写错配置会让 Hyprland 拒绝启动。** 旧语法 `windowrulev2` 在 0.56 是硬错误（`--verify-config` 退出码 1），`source =` 指向不存在的文件同样是硬错误。因此规则内联 + 注释标记，且写入前先离线校验。
+- app_id 公式在 Hyprland 上与 KDE 一致（`chrome-127.0.0.1__-Default`），无需改动。
+
+### 已知限制
+
+- 需要 Hyprland 0.53 及以上。更早的版本只有 `windowrulev2` 老语法，未做实测，插件会跳过并说明原因。
+- 尚未在**完整 Hyprland 会话**（而非嵌套）下验证桌面入口与图标显示。
+
 ## [0.2.0] - 2026-09-20
 
 桌面集成第一次拥有图形配置界面，并换上了自己的图标。

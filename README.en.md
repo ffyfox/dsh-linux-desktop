@@ -83,7 +83,7 @@ Installation writes a CLI shim to `~/.local/bin/dsh-desktop`, so the following c
 | `dsh-desktop restart` | Restart `dsh web` |
 | `dsh-desktop runtime` | Show the runtime state of the current `dsh web` |
 
-Options for `install`: `--force`, `--port`, `--host`, `--size`, `--browser`, `--profile-mode`, `--no-kwin`, `--no-auto-install`.
+Options for `install`: `--force`, `--port`, `--host`, `--size`, `--browser`, `--profile-mode`, `--no-kwin`, `--hyprland`, `--no-auto-install`.
 Options for `stop` and `restart`: `--force`.
 General options: `--root <dir>` (sandbox mode, redirects all reads and writes into that directory) and `--json`.
 
@@ -109,6 +109,7 @@ The config file is `~/.config/dsh-desktop/config.json`, created automatically on
 | `profileMode` | `dedicated` (default) or `shared`. |
 | `autoInstall` | Whether to auto-install or self-repair on `dsh web` boot. |
 | `manageKwinRules` | Whether to manage the KWin window rule; only effective on KDE. |
+| `manageHyprlandRules` | Whether to manage the Hyprland window rule; only effective on Hyprland. **Off by default** — see "Hyprland and window size" below. |
 | `terminalAction` / `terminalCommand` | The "run in terminal" entry in the desktop entry's context menu. Empty means auto-detect an installed terminal. |
 
 There are three ways to change the configuration. The first is recommended:
@@ -141,20 +142,45 @@ When Chrome is already running, executing `chrome --app=URL` hands the window of
 | `dedicated` (default) | `--user-data-dir` points at a dedicated profile directory, so the browser process lives and dies with the window and window close can be detected reliably | One extra browser process; a separate cookie jar that authenticates via the token URL on first launch and is then good for 30 days |
 | `shared` | Reuses the default browser profile directory | Shared login state, no extra process; but when Chrome is already running the window close cannot be detected, so the service is not stopped automatically — a notification explains this |
 
+## Hyprland and window size
+
+Hyprland is a tiling compositor, and a fixed window size conflicts with tiling by nature. Measured on Hyprland 0.56.2:
+
+| Managed? | Result |
+|---|---|
+| No (**default**) | The window tiles and fills the workspace. The `window` width/height has **no effect** — under tiling the `--window-size` the browser passes is ignored by the compositor. |
+| Yes | The window is forced to float at the `window` width/height. |
+
+Off by default is deliberate: someone who chose a tiling WM wants tiling, and the plugin should not silently turn that into floating. To pin the size, enable "Manage the Hyprland window rule" on the settings page, or run `dsh-desktop install --hyprland`.
+
+The rule is inlined into your Hyprland config and wrapped in comment markers:
+
+```ini
+# dsh-desktop begin
+windowrule = match:class ^(chrome-127\.0\.0\.1__-Default)$, float on, size 1200 750
+# dsh-desktop end
+```
+
+Since Hyprland 0.56 a fresh install generates a Lua-format `hyprland.lua`, while users upgrading from older versions keep `hyprland.conf`; the plugin writes whichever syntax belongs to the file actually in effect (when both exist, `.lua` wins, matching Hyprland's own behaviour).
+
+Before writing anything it runs `Hyprland --verify-config` offline, and if verification fails it writes nothing at all — a config error makes Hyprland refuse to start, and your whole desktop depends on that file. For the same reason the plugin will **not** create a config file for a user who has never run Hyprland, and does not use `source =` to include an external file (a missing target breaks the entire config just as badly).
+
+Requires Hyprland 0.53 or newer (earlier versions only have the old `windowrulev2` syntax, which is untested here; the plugin skips and says so).
+
 ## Uninstall
 
 ```bash
 dsh plugin --profile web exec dsh-desktop uninstall
 ```
 
-Removes the launcher script, `dsh.desktop`, the app_id alias entry, the icons, and the KWin rule.
+Removes the launcher script, `dsh.desktop`, the app_id alias entry, the icons, and the KWin / Hyprland rules.
 Keeps `~/.config/dsh-desktop/`, which holds the configuration and backups.
 
 ## Compatibility
 
 | Dimension | Status |
 |---|---|
-| Desktop environment | **Verified**: KDE Plasma 6. **Expected to work, not verified**: GNOME, Hyprland/Sway and other wlroots compositors, Xfce, MATE, Cinnamon, i3 — the window and desktop entry are standard XDG, and the KWin rule is only written on KDE |
+| Desktop environment | **Verified**: KDE Plasma 6. **Partially verified**: Hyprland 0.56.2 (app_id derivation and the window size rule are measured — see "Hyprland and window size"; the desktop entry under a full session is not verified). **Expected to work, not verified**: GNOME, Sway and other wlroots compositors, Xfce, MATE, Cinnamon, i3 — the window and desktop entry are standard XDG, and window rules are only written on KDE and Hyprland |
 | Display protocol | **Verified**: Wayland. **Expected to work, not verified**: X11 |
 | Browser | **Verified**: Google Chrome. **Expected to work, not verified**: Chromium, Brave, Edge, Vivaldi, Opera |
 | Distribution | **Verified**: Arch Linux |
@@ -175,6 +201,8 @@ dsh plugin --profile web exec dsh-desktop doctor
 | Window shows `dsh web authentication required` | No tokenized URL was obtained and the dedicated profile directory has no valid cookie. Restart `dsh web` once. |
 | The window opened in the default browser profile rather than a standalone one | A deliberate fallback: with no token and a dedicated profile directory that has never authenticated, it uses the default profile to avoid a 401. It reverts after one `dsh web` restart. |
 | Window stretches to full height and touches the top and bottom edges | The KWin rule is not active. Check whether any group in `~/.config/kwinrulesrc` has `description = DeepSeek Harness Window Rule` (the group name is a number, not that sentence), then run `qdbus6 org.kde.KWin /KWin reconfigure`. |
+| On Hyprland the window fills the whole workspace and the size setting does nothing | That is the **default**: under tiling the size setting has no effect. To pin the size, enable "Manage the Hyprland window rule" on the settings page, or run `dsh-desktop install --hyprland`. |
+| On Hyprland, management is enabled but the window still fills the workspace | Check whether `~/.config/hypr/hyprland.conf` (or `hyprland.lua`) contains a `dsh-desktop begin` marker block. If not, the write was skipped — run `dsh-desktop doctor` and read the reason on the `hyprland-rule` line (commonly: Hyprland older than 0.53, or no config file yet). |
 | The launcher does nothing | Run `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-desktop-app` to see debug output. Logs live in `$XDG_RUNTIME_DIR/dsh-desktop-web.log`. |
 | Right-click "Open in Terminal (dsh-tui)" drops into a plain bash and prints `Could not find 'dsh'` | The entry used a bare `dsh`, and the desktop session `PATH` has no user-level bin directories. Run `dsh-desktop install --force` to regenerate the entry; the action now uses the absolute path to `dsh`. |
 | The service was just auto-started and the window takes tens of seconds to appear | Deliberate: the auto-start path waits for the `dsh web:` settled line and then for a session-API probe to succeed before opening the window. The larger the server's plugin set, the longer that wait; when the window does appear the backend is guaranteed ready. |

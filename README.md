@@ -83,7 +83,7 @@ dsh plugin --profile web add /path/to/dsh-linux-desktop
 | `dsh-desktop restart` | 重启 `dsh web` |
 | `dsh-desktop runtime` | 查看当前 `dsh web` 的运行时状态 |
 
-`install` 的选项：`--force`、`--port`、`--host`、`--size`、`--browser`、`--profile-mode`、`--no-kwin`、`--no-auto-install`。
+`install` 的选项：`--force`、`--port`、`--host`、`--size`、`--browser`、`--profile-mode`、`--no-kwin`、`--hyprland`、`--no-auto-install`。
 `stop` 与 `restart` 的选项：`--force`。
 通用选项：`--root <目录>`（沙箱模式，把所有读写重定向到该目录）、`--json`。
 
@@ -109,6 +109,7 @@ dsh plugin --profile web exec dsh-desktop <子命令>
 | `profileMode` | `dedicated`（默认）或 `shared`。 |
 | `autoInstall` | 是否在 `dsh web` 启动时自动安装或自愈。 |
 | `manageKwinRules` | 是否托管 KWin 窗口规则，仅 KDE 生效。 |
+| `manageHyprlandRules` | 是否托管 Hyprland 窗口规则，仅 Hyprland 生效。**默认关闭**，见下文「Hyprland 与窗口尺寸」。 |
 | `terminalAction` / `terminalCommand` | 桌面入口右键菜单中的「以终端界面运行」。留空则自动探测已安装的终端。 |
 
 修改配置有三种方式。推荐第一种：
@@ -140,6 +141,31 @@ Chrome 已在运行时执行 `chrome --app=URL` 会把窗口移交给既有浏�
 | `dedicated`（默认） | 用 `--user-data-dir` 指向独立配置目录，浏览器进程与窗口同生共死，因此可以可靠地感知窗口关闭 | 多一个浏览器进程；独立的 cookie 罐，首次通过 token 地址登录，之后 30 天免登录 |
 | `shared` | 复用默认浏览器配置目录 | 共享登录态，无额外进程；但 Chrome 已在运行时无法感知窗口关闭，因此不会自动停止服务，此时会弹出通知说明 |
 
+## Hyprland 与窗口尺寸
+
+Hyprland 是平铺合成器，而「固定窗口尺寸」和「平铺」天然冲突。实测（Hyprland 0.56.2）：
+
+| 是否托管 | 结果 |
+|---|---|
+| 不托管（**默认**） | 窗口按平铺布局铺满工作区。此时 `window` 里的宽高**不起作用** —— 平铺下浏览器传的 `--window-size` 会被合成器忽略。 |
+| 托管 | 强制该窗口浮动，并使用 `window` 里的宽高。 |
+
+默认关闭是刻意的：选了平铺 WM 的用户就是要平铺，插件不该擅自把它改成浮动。想要固定尺寸就在设置页打开「托管 Hyprland 窗口规则」，或用 `dsh-desktop install --hyprland`。
+
+规则会被内联进你的 Hyprland 配置，并用注释标记包起来：
+
+```ini
+# dsh-desktop begin
+windowrule = match:class ^(chrome-127\.0\.0\.1__-Default)$, float on, size 1200 750
+# dsh-desktop end
+```
+
+Hyprland 0.56 起全新安装生成的是 Lua 格式的 `hyprland.lua`，老用户升级上来的仍是 `hyprland.conf`；插件会按实际生效的那一份写入对应语法（两者同时存在时 `.lua` 优先，与 Hyprland 自身行为一致）。
+
+写入前会先用 `Hyprland --verify-config` 离线校验，校验不过就一个字都不写 —— 因为 Hyprland 遇到配置错误会直接拒绝启动，而你的整个桌面都挂在那个配置上。同理，插件**不会**替尚未运行过 Hyprland 的用户创建配置文件，也不会用 `source =` 引入外部文件（目标文件一旦缺失同样会导致整个配置加载失败）。
+
+需要 Hyprland 0.53 及以上（更早的版本只有 `windowrulev2` 老语法，未做实测，插件会跳过并说明原因）。
+
 ## 卸载
 
 ```bash
@@ -153,7 +179,7 @@ dsh plugin --profile web exec dsh-desktop uninstall
 
 | 维度 | 状态 |
 |---|---|
-| 桌面环境 | **已验证**：KDE Plasma 6。**预期可用但未验证**：GNOME、Hyprland/Sway 等 wlroots 系、Xfce、MATE、Cinnamon、i3 —— 窗口与桌面入口均为标准 XDG，KWin 规则只在 KDE 下写入 |
+| 桌面环境 | **已验证**：KDE Plasma 6。**部分验证**：Hyprland 0.56.2（app_id 推导与窗口尺寸规则已实测，见「Hyprland 与窗口尺寸」；完整桌面会话下的桌面入口未验证）。**预期可用但未验证**：GNOME、Sway 等其它 wlroots 系、Xfce、MATE、Cinnamon、i3 —— 窗口与桌面入口均为标准 XDG，窗口规则只在 KDE 与 Hyprland 下写入 |
 | 显示协议 | **已验证**：Wayland。**预期可用但未验证**：X11 |
 | 浏览器 | **已验证**：Google Chrome。**预期可用但未验证**：Chromium、Brave、Edge、Vivaldi、Opera |
 | 发行版 | **已验证**：Arch Linux |
@@ -174,6 +200,8 @@ dsh plugin --profile web exec dsh-desktop doctor
 | 窗口显示 `dsh web authentication required` | 未取得带 token 的地址，且独立配置目录中没有有效 cookie。重启一次 `dsh web`。 |
 | 窗口开在默认浏览器配置中而非独立窗口 | 有意的兜底：未取得 token 且独立配置目录从未登录时，改用默认配置以避免 401。重启一次 `dsh web` 后恢复。 |
 | 窗口纵向拉满并贴住上下边缘 | KWin 规则未生效。检查 `~/.config/kwinrulesrc` 中是否存在某一段的 `description = DeepSeek Harness Window Rule`（段名是数字，不是这句话），然后执行 `qdbus6 org.kde.KWin /KWin reconfigure`。 |
+| Hyprland 下窗口铺满整个工作区，宽高设置没反应 | 这是**默认行为**：平铺布局下尺寸设置不生效。要固定尺寸，请在设置页打开「托管 Hyprland 窗口规则」，或执行 `dsh-desktop install --hyprland`。 |
+| Hyprland 下开了托管，窗口仍然铺满 | 检查 `~/.config/hypr/hyprland.conf`（或 `hyprland.lua`）里是否有 `dsh-desktop begin` 标记块。没有就说明写入被跳过了，执行 `dsh-desktop doctor` 看 `hyprland-rule` 一项给出的原因（常见：Hyprland 版本低于 0.53、尚未生成配置文件）。 |
 | 启动器没有反应 | 以 `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-desktop-app` 运行查看调试输出。日志位于 `$XDG_RUNTIME_DIR/dsh-desktop-web.log`。 |
 | 右键「以终端界面运行 (dsh-tui)」打开的是一个普通 bash，并提示 `Could not find 'dsh'` | 入口里写的是裸 `dsh`，而桌面会话的 `PATH` 不含用户级 bin。执行 `dsh-desktop install --force` 刷新入口，动作会改用 `dsh` 的绝对路径。 |
 | 服务是刚由启动器拉起的，窗口要等十几秒才出现 | 有意的：自启路径会先等 `dsh web:` 落定行，再等一次会话 API 探测成功，两道都过才开窗。服务端插件集越大，这段等待越长；窗口出现时后端一定是可用的。 |

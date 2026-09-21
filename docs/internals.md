@@ -22,6 +22,7 @@ src/
   config.js         配置默认值、校验、读写
   desktop-entry.js  .desktop 渲染 + app_id 推导
   kwin.js           kwinrulesrc 安全读写
+  hyprland.js       Hyprland 配置（hyprlang / lua）安全读写
   runtime.js        运行时状态发布
   server.js         端口探测 / 进程校验 / 启停
   assets/           图标位图 whale-girl.png + 启动器 bash 模板
@@ -124,14 +125,34 @@ README 里对用户承诺的是结论，这里是兑现结论的手段。
 
 所有副作用（写文件、跑外部命令）都包在 `try/catch` 里，任何一步失败只写日志，**绝不向上抛**。自动安装失败不会让 `dsh web` 起不来 —— 对一个在宿主进程里跑的插件行，这是底线。
 
-### 4.3 唯一被修改的文件：`kwinrulesrc`
+### 4.3 被修改的文件：`kwinrulesrc` 与 Hyprland 配置
 
-其余都是新增文件。KDE 的 `~/.config/kwinrulesrc` 是唯一例外，处理方式：
+其余都是新增文件。有两处例外，都是**用户已有的配置文件**：
+
+**KDE 的 `~/.config/kwinrulesrc`**：
 
 - **逐行保留原文**，只改我们自己那一段和 `[General]` 的两行。用户手写的其它规则（比如给桌面宠物加 `skiptaskbar`）必须一字不差地留着 —— 所以 `kwin.js` **刻意不做「整体解析再重新序列化」**。
 - **改之前备份**成 `kwinrulesrc.dsh-backup`。
 - **新规则 id 取「所有数字段名的最大值 + 1」**，而不是 `count + 1`。用户删过规则时后者会撞号并覆盖别人的规则。
 - 规则值 `sizerule = 3` 是 **Apply Initially** —— 只在窗口创建时应用一次，之后不干扰用户拖拽。
+
+**Hyprland 的 `~/.config/hypr/hyprland.conf`（或 `hyprland.lua`）** —— 风险比 KDE 高一档，因为 Hyprland 遇到配置错误会**拒绝启动**，用户的整个桌面都挂在那个文件上。所以 `hyprland.js` 有足足四道闸，全部通过才落盘：
+
+1. **配置文件不存在就跳过。** 不替用户抢先创建 —— Hyprland 首次运行会自己生成一份默认配置，我们抢先建一个只有规则的文件会让用户失去它。
+2. **版本读不出来就跳过**（`Hyprland --version-json`）。
+3. **版本低于 0.53 就跳过**：更早的版本只有 `windowrulev2` 老语法，本机无法实测，不拿用户的配置冒险。
+4. **`Hyprland --verify-config` 校验不过就跳过**：离线校验，不起合成器、不占屏幕。只校验我们自己那块，不校验合并结果 —— 合并结果里可能有 `source = 相对路径`，复制到临时目录会解析不到，反而产生假失败。
+
+另外两条硬性约定：
+
+- **规则内联进主配置**，用 `dsh-desktop begin` / `end` 注释标记包起来。**绝不用 `source =`** —— 实测 `source` 指向不存在的文件同样是硬错误，一旦我们的文件被删（清理、同步冲突、卸载不干净），用户的整个配置都会加载失败。
+- **两套语法按文件格式选**：`.lua` 用 `hl.window_rule({...})`，`.conf` 用 `windowrule = match:class ...`。两者同时存在时 `.lua` 优先，与 Hyprland 自身行为一致。
+
+### 4.3.1 Hyprland 为什么必须强制浮动
+
+实测（Hyprland 0.56.2）：不写规则时窗口被平铺铺满工作区，**浏览器传的 `--window-size` 被完全忽略**；而 `size` 规则**只对浮动窗口有效**，少了 `float` 就静默失效。所以托管时写的是 `float on, size W H`，`float` 不能省。
+
+正因如此，这个功能**默认关闭**：选了平铺 WM 的用户就是要平铺，插件不该擅自改成浮动。KDE 默认开、Hyprland 默认关，是有意的差异。
 
 ### 4.4 安全底线：不是自己启的服务绝不接管
 
