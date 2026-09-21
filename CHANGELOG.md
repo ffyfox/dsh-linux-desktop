@@ -3,7 +3,36 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## [0.3.0] - 未发布
+## [0.4.0] - 未发布
+
+加入 GNOME 支持。与 KDE / Hyprland 不同，这一版**不写任何配置** —— 因为实测证明 GNOME 根本不需要窗口规则。
+
+### 新增
+
+- **GNOME 尺寸现实检查**（`src/gnome.js`，**只读**）
+  - `dsh-desktop install` / `status` / `doctor` 在 GNOME 上新增 `gnome-window-size` 一项：读一次逻辑工作区（`gdctl show`）与 `org.gnome.mutter auto-maximize`，判断配置的窗口尺寸会不会被 Mutter 的 auto-maximize 吃掉。
+  - 超过阈值时升级为 `warning`，并给出算出来的真实占比；`doctor` 附带两种解法。
+  - 设置页「窗口宽度/高度」的说明文字补上了这条注意事项。
+
+### 变更
+
+- **桌面环境兼容性**：GNOME 从「预期可用但未验证」升级为「部分验证」（窗口尺寸行为已实测）。
+
+### 实测结论（Mutter 50.5，headless 虚拟显示器）
+
+- **GNOME 原生遵循 `--window-size`，不需要任何窗口规则。** GNOME 是堆叠式（浮动）窗口管理器，实测 700x500 / 900x600 / 1024x640 / 1100x700 / 1152x720 / 1200x750 / 1280x800 / 2200x1500 **全部精确遵循**。GNOME 既没有 `kwinrulesrc` 那样的规则文件，也没有对应的 dconf 键。
+- **唯一的例外是 auto-maximize。** Mutter 默认开启 `org.gnome.mutter auto-maximize`：窗口面积超过工作区一定比例时直接最大化，请求的尺寸被丢弃。源码常量是 `MAX_UNMAXIMIZED_WINDOW_AREA = .8`（`window-private.h:212`），而实测翻转点在 **83.2%~83.8%** 之间 —— 两者对不上，原因未查明。**告警因此取更保守的 0.8。**
+- **因果链已验证**：关掉 auto-maximize 后，连正好满屏的 2560x1600 都被遵循。
+- **GNOME 无法像 Hyprland 那样嵌套测试。** GNOME 49 起 X11 会话默认关闭、50 起移除，Mutter 50.5 的 `--help` 里已没有 `--nested`。测试台改用 `--headless --virtual-monitor`（走渲染节点但不做 mode setting，不影响正在运行的桌面）。
+- **位置设不了**：Wayland 没有让客户端给自己定位的协议，`--window-position` 在 GNOME 下无效。
+- **没有可用的第三方窗口规则扩展**：扩展生态里最接近的 Smart Auto Move NG（2.0 万下载）与 Deja Window（6,598 下载）都是「学习并恢复」型，不接受外部写入的规则；Deja Window 的 `window-app-configs` 是私有 JSON 格式，耦合它会随扩展升级而损坏。**故不集成。**
+
+### 已知限制
+
+- 尚未在**完整 GNOME 会话**（而非 headless）下验证桌面入口与图标显示。
+- `gdctl show` 读不出来时（例如不在 GNOME 会话里）会降级成不带数字的提示，不影响窗口本身。
+
+## [0.3.0] - 2026-09-21
 
 加入 Hyprland 支持。默认保持平铺，需要固定窗口尺寸的用户可以显式打开。
 

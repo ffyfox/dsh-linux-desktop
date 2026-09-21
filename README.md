@@ -166,6 +166,42 @@ Hyprland 0.56 起全新安装生成的是 Lua 格式的 `hyprland.lua`，老用�
 
 需要 Hyprland 0.53 及以上（更早的版本只有 `windowrulev2` 老语法，未做实测，插件会跳过并说明原因）。
 
+## GNOME 与窗口尺寸
+
+**GNOME 不需要窗口规则，插件也一行都不写。**
+
+GNOME 是堆叠式（浮动）窗口管理器 —— 和 Hyprland 正好相反。窗口本来就自由浮动，Mutter 会直接接受浏览器传的 `--window-size`。实测（Mutter 50.5，headless 虚拟显示器）：
+
+| `--window-size` | 实测窗口 |
+|---|---|
+| 900,600 | 900x600 |
+| 1200,750 | 1200x750 |
+| 1280,800 | 1280x800 |
+| 2200,1500 | 2200x1500 |
+
+全部**精确遵循**。GNOME 既没有 `kwinrulesrc` 那样的规则文件，也没有对应的 dconf 键 —— 这不是「还没支持」，是 GNOME 的设计如此。所以插件在 GNOME 下不写任何配置。
+
+### 唯一的例外：auto-maximize
+
+Mutter 默认开启 `org.gnome.mutter auto-maximize`：**窗口面积超过工作区约 80% 时直接把它最大化，请求的尺寸被丢弃。**
+
+所以 `dsh-desktop status` / `doctor` 会读一次逻辑工作区（**只读**，用 `gdctl show`），并在你的 `window` 尺寸会触发这条规则时告警：
+
+```
+! gnome-window-size    窗口 2400x1500 占逻辑工作区 2560x1600 的 88%，超过 80% —— GNOME 会把它最大化，尺寸设置将不生效。
+```
+
+两个解决办法：
+
+1. 把窗口宽高调到逻辑工作区的 80% 以下（推荐 —— 不影响其它应用）；
+2. `gsettings set org.gnome.mutter auto-maximize false`。注意这是**全局**设置，会让**所有**应用都不再自动最大化。插件**不会**替你改它，因为那不是「针对某个窗口的规则」。用 `gsettings reset org.gnome.mutter auto-maximize` 还原。
+
+阈值取 80%：源码常量是 `MAX_UNMAXIMIZED_WINDOW_AREA = .8`，而实测翻转点在 83.2%~83.8% 之间（原因未查明）。**宁可早一点提醒，也不要让你遇到「我明明设了尺寸却没生效」。**
+
+### 位置设不了
+
+Wayland 没有让客户端给自己定位的协议，GNOME 用自己的摆放算法。`--window-position` 在 GNOME 下无效 —— 这不是插件没做，是协议层没有这个能力。
+
 ## 卸载
 
 ```bash
@@ -179,7 +215,7 @@ dsh plugin --profile web exec dsh-desktop uninstall
 
 | 维度 | 状态 |
 |---|---|
-| 桌面环境 | **已验证**：KDE Plasma 6。**部分验证**：Hyprland 0.56.2（app_id 推导与窗口尺寸规则已实测，见「Hyprland 与窗口尺寸」；完整桌面会话下的桌面入口未验证）。**预期可用但未验证**：GNOME、Sway 等其它 wlroots 系、Xfce、MATE、Cinnamon、i3 —— 窗口与桌面入口均为标准 XDG，窗口规则只在 KDE 与 Hyprland 下写入 |
+| 桌面环境 | **已验证**：KDE Plasma 6。**部分验证**：Hyprland 0.56.2（app_id 推导与窗口尺寸规则已实测，见「Hyprland 与窗口尺寸」；完整桌面会话下的桌面入口未验证）。**部分验证**：GNOME / Mutter 50.5（窗口尺寸行为已实测，见「GNOME 与窗口尺寸」；完整桌面会话下的桌面入口未验证）。**预期可用但未验证**：Sway 等其它 wlroots 系、Xfce、MATE、Cinnamon、i3 —— 窗口与桌面入口均为标准 XDG，窗口规则只在 KDE 与 Hyprland 下写入 |
 | 显示协议 | **已验证**：Wayland。**预期可用但未验证**：X11 |
 | 浏览器 | **已验证**：Google Chrome。**预期可用但未验证**：Chromium、Brave、Edge、Vivaldi、Opera |
 | 发行版 | **已验证**：Arch Linux |
@@ -202,6 +238,8 @@ dsh plugin --profile web exec dsh-desktop doctor
 | 窗口纵向拉满并贴住上下边缘 | KWin 规则未生效。检查 `~/.config/kwinrulesrc` 中是否存在某一段的 `description = DeepSeek Harness Window Rule`（段名是数字，不是这句话），然后执行 `qdbus6 org.kde.KWin /KWin reconfigure`。 |
 | Hyprland 下窗口铺满整个工作区，宽高设置没反应 | 这是**默认行为**：平铺布局下尺寸设置不生效。要固定尺寸，请在设置页打开「托管 Hyprland 窗口规则」，或执行 `dsh-desktop install --hyprland`。 |
 | Hyprland 下开了托管，窗口仍然铺满 | 检查 `~/.config/hypr/hyprland.conf`（或 `hyprland.lua`）里是否有 `dsh-desktop begin` 标记块。没有就说明写入被跳过了，执行 `dsh-desktop doctor` 看 `hyprland-rule` 一项给出的原因（常见：Hyprland 版本低于 0.53、尚未生成配置文件）。 |
+| GNOME 下窗口一开就最大化，宽高设置没反应 | 触发了 Mutter 的 auto-maximize（窗口面积超过逻辑工作区约 80%）。把宽高调到屏幕的 80% 以下，或自行执行 `gsettings set org.gnome.mutter auto-maximize false`（全局设置，插件不会代改）。`dsh-desktop doctor` 的 `gnome-window-size` 一项会算出具体占比。 |
+| GNOME 下 `gnome-window-size` 只说「原生遵循」但没给数字 | 读不到逻辑工作区（`gdctl show` 失败，例如不在 GNOME 会话里，或 GNOME 版本过旧）。这是正常降级，不影响窗口本身 —— GNOME 本来就遵循 `--window-size`。 |
 | 启动器没有反应 | 以 `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-desktop-app` 运行查看调试输出。日志位于 `$XDG_RUNTIME_DIR/dsh-desktop-web.log`。 |
 | 右键「以终端界面运行 (dsh-tui)」打开的是一个普通 bash，并提示 `Could not find 'dsh'` | 入口里写的是裸 `dsh`，而桌面会话的 `PATH` 不含用户级 bin。执行 `dsh-desktop install --force` 刷新入口，动作会改用 `dsh` 的绝对路径。 |
 | 服务是刚由启动器拉起的，窗口要等十几秒才出现 | 有意的：自启路径会先等 `dsh web:` 落定行，再等一次会话 API 探测成功，两道都过才开窗。服务端插件集越大，这段等待越长；窗口出现时后端一定是可用的。 |

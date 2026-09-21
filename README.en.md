@@ -167,6 +167,42 @@ Before writing anything it runs `Hyprland --verify-config` offline, and if verif
 
 Requires Hyprland 0.53 or newer (earlier versions only have the old `windowrulev2` syntax, which is untested here; the plugin skips and says so).
 
+## GNOME and window size
+
+**GNOME needs no window rule, and the plugin writes nothing at all.**
+
+GNOME is a stacking (floating) window manager — the exact opposite of Hyprland. Windows float freely, so Mutter honours the `--window-size` the browser passes. Measured on Mutter 50.5 with a headless virtual monitor:
+
+| `--window-size` | Actual window |
+|---|---|
+| 900,600 | 900x600 |
+| 1200,750 | 1200x750 |
+| 1280,800 | 1280x800 |
+| 2200,1500 | 2200x1500 |
+
+All honoured **exactly**. GNOME has neither a rule file like `kwinrulesrc` nor an equivalent dconf key — this is not "not supported yet", it is how GNOME is designed. So the plugin writes no configuration on GNOME.
+
+### The one exception: auto-maximize
+
+Mutter enables `org.gnome.mutter auto-maximize` by default: **when a window's area exceeds roughly 80% of the work area it is maximized outright and the requested size is discarded.**
+
+So `dsh-desktop status` / `doctor` reads the logical work area once (**read-only**, via `gdctl show`) and warns when your `window` size would trip that rule:
+
+```
+! gnome-window-size    window 2400x1500 covers 88% of the 2560x1600 logical work area, over 80% — GNOME will maximize it and the size setting will have no effect.
+```
+
+Two ways out:
+
+1. Lower the width/height below 80% of the logical work area (recommended — it affects nothing else);
+2. `gsettings set org.gnome.mutter auto-maximize false`. Note this is a **global** setting: **no** application will auto-maximize any more. The plugin will **not** change it for you, because it is not a per-window rule. Restore it with `gsettings reset org.gnome.mutter auto-maximize`.
+
+The 80% threshold comes from the source constant `MAX_UNMAXIMIZED_WINDOW_AREA = .8`, while the measured flip point was between 83.2% and 83.8% (cause unknown). **Warning a little early beats letting you hit "I set a size and it did nothing".**
+
+### Position cannot be set
+
+Wayland has no protocol for a client to position itself, and GNOME uses its own placement algorithm. `--window-position` has no effect on GNOME — not because the plugin skipped it, but because the protocol layer has no such capability.
+
 ## Uninstall
 
 ```bash
@@ -180,7 +216,7 @@ Keeps `~/.config/dsh-desktop/`, which holds the configuration and backups.
 
 | Dimension | Status |
 |---|---|
-| Desktop environment | **Verified**: KDE Plasma 6. **Partially verified**: Hyprland 0.56.2 (app_id derivation and the window size rule are measured — see "Hyprland and window size"; the desktop entry under a full session is not verified). **Expected to work, not verified**: GNOME, Sway and other wlroots compositors, Xfce, MATE, Cinnamon, i3 — the window and desktop entry are standard XDG, and window rules are only written on KDE and Hyprland |
+| Desktop environment | **Verified**: KDE Plasma 6. **Partially verified**: Hyprland 0.56.2 (app_id derivation and the window size rule are measured — see "Hyprland and window size"; the desktop entry under a full session is not verified). **Partially verified**: GNOME / Mutter 50.5 (window sizing behaviour is measured — see "GNOME and window size"; the desktop entry under a full session is not verified). **Expected to work, not verified**: Sway and other wlroots compositors, Xfce, MATE, Cinnamon, i3 — the window and desktop entry are standard XDG, and window rules are only written on KDE and Hyprland |
 | Display protocol | **Verified**: Wayland. **Expected to work, not verified**: X11 |
 | Browser | **Verified**: Google Chrome. **Expected to work, not verified**: Chromium, Brave, Edge, Vivaldi, Opera |
 | Distribution | **Verified**: Arch Linux |
@@ -203,6 +239,8 @@ dsh plugin --profile web exec dsh-desktop doctor
 | Window stretches to full height and touches the top and bottom edges | The KWin rule is not active. Check whether any group in `~/.config/kwinrulesrc` has `description = DeepSeek Harness Window Rule` (the group name is a number, not that sentence), then run `qdbus6 org.kde.KWin /KWin reconfigure`. |
 | On Hyprland the window fills the whole workspace and the size setting does nothing | That is the **default**: under tiling the size setting has no effect. To pin the size, enable "Manage the Hyprland window rule" on the settings page, or run `dsh-desktop install --hyprland`. |
 | On Hyprland, management is enabled but the window still fills the workspace | Check whether `~/.config/hypr/hyprland.conf` (or `hyprland.lua`) contains a `dsh-desktop begin` marker block. If not, the write was skipped — run `dsh-desktop doctor` and read the reason on the `hyprland-rule` line (commonly: Hyprland older than 0.53, or no config file yet). |
+| On GNOME the window opens maximized and the size setting does nothing | Mutter's auto-maximize fired (window area above ~80% of the logical work area). Lower the size below 80% of the screen, or run `gsettings set org.gnome.mutter auto-maximize false` yourself (a global setting; the plugin will not change it for you). The `gnome-window-size` line in `dsh-desktop doctor` computes the exact percentage. |
+| On GNOME `gnome-window-size` only says "honoured natively" without numbers | The logical work area could not be read (`gdctl show` failed — e.g. not in a GNOME session, or a very old GNOME). This is a normal fallback and does not affect the window: GNOME honours `--window-size` anyway. |
 | The launcher does nothing | Run `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-desktop-app` to see debug output. Logs live in `$XDG_RUNTIME_DIR/dsh-desktop-web.log`. |
 | Right-click "Open in Terminal (dsh-tui)" drops into a plain bash and prints `Could not find 'dsh'` | The entry used a bare `dsh`, and the desktop session `PATH` has no user-level bin directories. Run `dsh-desktop install --force` to regenerate the entry; the action now uses the absolute path to `dsh`. |
 | The service was just auto-started and the window takes tens of seconds to appear | Deliberate: the auto-start path waits for the `dsh web:` settled line and then for a session-API probe to succeed before opening the window. The larger the server's plugin set, the longer that wait; when the window does appear the backend is guaranteed ready. |

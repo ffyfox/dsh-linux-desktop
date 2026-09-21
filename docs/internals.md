@@ -23,6 +23,7 @@ src/
   desktop-entry.js  .desktop 渲染 + app_id 推导
   kwin.js           kwinrulesrc 安全读写
   hyprland.js       Hyprland 配置（hyprlang / lua）安全读写
+  gnome.js          GNOME/Mutter 窗口尺寸现实检查（**只读，不写任何配置**）
   runtime.js        运行时状态发布
   server.js         端口探测 / 进程校验 / 启停
   assets/           图标位图 whale-girl.png + 启动器 bash 模板
@@ -153,6 +154,23 @@ README 里对用户承诺的是结论，这里是兑现结论的手段。
 实测（Hyprland 0.56.2）：不写规则时窗口被平铺铺满工作区，**浏览器传的 `--window-size` 被完全忽略**；而 `size` 规则**只对浮动窗口有效**，少了 `float` 就静默失效。所以托管时写的是 `float on, size W H`，`float` 不能省。
 
 正因如此，这个功能**默认关闭**：选了平铺 WM 的用户就是要平铺，插件不该擅自改成浮动。KDE 默认开、Hyprland 默认关，是有意的差异。
+
+### 4.3.2 GNOME：没有可写的东西，所以一行都不写
+
+GNOME 既没有窗口规则配置文件，也没有对应的 dconf 键 —— 这不是「还没支持」，是设计如此。而它也**不需要**：GNOME 是堆叠式（浮动）窗口管理器，Mutter 直接接受 `--window-size`（实测 700x500 / 900x600 / 1200x750 / 1280x800 / 2200x1500 全部精确遵循）。
+
+所以 `gnome.js` **只读不写**，连 `manageGnomeRules` 这样的配置项都不存在。它做两件事：
+
+1. 用 `gdctl show`（随 mutter 一起安装，只读）解析出**主逻辑显示器**尺寸。解析器 `parseGdctlShow` 是纯函数，用真实输出做回归；任何看不懂的结构都返回 `ok: false` 而不是猜一个尺寸 —— 宁可降级成不带数字的提示，也不要给出错的屏幕尺寸。逻辑尺寸 = 物理像素 / 缩放，这一点必须算对：`auto-maximize` 比的是**逻辑**值。
+2. 用 `gsettings get org.gnome.mutter auto-maximize`（只读）确认它是否开启。
+
+然后判断：**窗口面积 > 逻辑工作区 × 0.8 就会触发 Mutter 的 auto-maximize，请求的尺寸被丢弃。**
+
+阈值取源码常量 0.8（`src/core/window-private.h:212`、`src/core/place.c:1099`），而不是实测翻转点（83.2%~83.8%，原因未查明）—— 保守取值只会让告警早出现，不会漏报。
+
+**为什么不代用户关掉 auto-maximize**：那是 `org.gnome.mutter` 下的**全局**设置，关掉之后**所有**应用都不再自动最大化。它不是「针对某个窗口的规则」，所以只写进建议文案。测试里有一条断言钉死这一点：installer 在 GNOME 上产生的**每一次** exec 都必须是 `gdctl show` 或 `gsettings get ...`，一旦有人加了 `gsettings set`，用例立刻失败。
+
+**位置设不了**：Wayland 没有让客户端给自己定位的协议，GNOME 用自己的摆放算法。
 
 ### 4.4 安全底线：不是自己启的服务绝不接管
 
