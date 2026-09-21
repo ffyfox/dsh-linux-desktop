@@ -908,7 +908,11 @@ function makeGnomeInstallSandbox(name, { size } = {}) {
   const env = {
     ...process.env,
     DSH_DESKTOP_ROOT: dir,
-    PATH: toolchain.pathValue,
+    // **只给假工具链，不追加真实 PATH** —— 刻意让本地跑起来和 CI runner 一样。
+    // CI 上没有终端模拟器，install() 会因此多出一条「未找到可用终端」的警告；
+    // 本地若有 konsole/kitty，那条警告就不出现。追加真实 PATH 会让同一份断言
+    // 在本地绿、在 CI 红（这个坑踩过两次）。
+    PATH: toolchain.bin,
     XDG_CURRENT_DESKTOP: 'GNOME',
     WAYLAND_DISPLAY: 'wayland-1',
   }
@@ -922,6 +926,14 @@ function makeGnomeInstallSandbox(name, { size } = {}) {
   return { dir, paths, env, config }
 }
 
+/**
+ * 只挑出**与本功能相关**的警告。
+ *
+ * install() 的 warnings 是个混合账本，还装着终端探测、图标转换器之类与 GNOME
+ * 无关的条目，而它们随环境变化。断言总条数等于把测试绑到跑它的机器上。
+ */
+const gnomeWarnings = (result) => result.warnings.filter((w) => /org\.gnome\.mutter auto-maximize/.test(w))
+
 await test('尺寸安全时：只给一条 info 说明', () => {
   const box = makeGnomeInstallSandbox('gnome-safe')
   const { exec } = fakeGnomeExec()
@@ -931,7 +943,7 @@ await test('尺寸安全时：只给一条 info 说明', () => {
   assert.ok(step, 'GNOME 上应当有一条尺寸说明')
   assert.equal(step.status, 'info')
   assert.match(step.detail, /原生遵循/)
-  assert.equal(result.warnings.length, 0, '安全时不该产生警告')
+  assert.equal(gnomeWarnings(result).length, 0, '安全时不该产生 GNOME 相关的警告')
   fs.rmSync(box.dir, { recursive: true, force: true })
 })
 
@@ -942,11 +954,12 @@ await test('尺寸过大时：升级成 warning 并进 warnings', () => {
 
   const step = stepOf(result, 'gnome-window-size')
   assert.equal(step.status, 'warning')
-  assert.equal(result.warnings.length, 1)
+  const ours = gnomeWarnings(result)
+  assert.equal(ours.length, 1)
   // warnings 放的是「动作」，不是把步骤行原样重复 —— 否则 CLI 上会出现两行一样的话。
-  assert.notEqual(result.warnings[0], step.detail, '步骤行与警告不能是同一句话')
-  assert.match(result.warnings[0], /gsettings set org\.gnome\.mutter auto-maximize false/)
-  assert.match(result.warnings[0], /2289x1431/, '要给出算出来的建议尺寸')
+  assert.notEqual(ours[0], step.detail, '步骤行与警告不能是同一句话')
+  assert.match(ours[0], /gsettings set org\.gnome\.mutter auto-maximize false/)
+  assert.match(ours[0], /2289x1431/, '要给出算出来的建议尺寸')
   fs.rmSync(box.dir, { recursive: true, force: true })
 })
 
@@ -996,7 +1009,7 @@ await test('gdctl 读不出来时仍然给说明，不报失败', () => {
 
   const step = stepOf(result, 'gnome-window-size')
   assert.equal(step.status, 'info', '读不出来是正常情况（比如不在 GNOME 会话里），不该报错')
-  assert.equal(result.warnings.length, 0)
+  assert.equal(gnomeWarnings(result).length, 0, '读不出来不该产生 GNOME 相关的警告')
   fs.rmSync(box.dir, { recursive: true, force: true })
 })
 
