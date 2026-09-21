@@ -12,18 +12,19 @@ This is a DSH bundle. It reuses the Chromium-family browser already installed on
 
 `dsh web` provides a complete web interface, but on a Linux desktop it has three rough edges: no dedicated taskbar or Alt-Tab entry; a service lifetime tied to a terminal; and a community of desktop plugins that targets Windows and macOS, with nothing for Linux XDG desktop entries.
 
-This plugin addresses all three. It does four things:
+This plugin addresses all three. It does five things:
 
 1. Writes a standard XDG desktop entry to `~/.local/share/applications/`, so `dsh web` can be started from the app launcher.
 2. Opens a window using Chromium's `--app` mode, containing only the dsh web interface — no address bar, tabs, or bookmarks bar.
 3. Starts `dsh web` when it is not running, and stops the service it started once the window closes.
 4. Maintains those files idempotently: every `dsh web` boot syncs them to the current version, and leaves them untouched when nothing changed.
+5. Contributes a "Desktop integration" card to the Web settings page under Plugins → Plugin configuration, for editing the configuration below.
 
 ## Requirements
 
 - Linux
 - A Chromium-family browser: Google Chrome, Chromium, Brave, Microsoft Edge, Vivaldi, or Opera
-- `dsh` installed and on `PATH`
+- `dsh` installed (its absolute path is baked into the launcher and the context-menu action at install time, so it need not be on the desktop session `PATH`)
 - Optional: `curl` (falls back to bash's built-in `/dev/tcp` for port probing)
 
 Firefox is not supported: Mozilla removed SSB (Site Specific Browser), so Firefox cannot provide a chromeless standalone window. Degrading to `firefox --new-window` would bring back the address bar and tabs, so this plugin fails loudly in that case instead of silently degrading.
@@ -110,16 +111,26 @@ The config file is `~/.config/dsh-desktop/config.json`, created automatically on
 | `manageKwinRules` | Whether to manage the KWin window rule; only effective on KDE. |
 | `terminalAction` / `terminalCommand` | The "run in terminal" entry in the desktop entry's context menu. Empty means auto-detect an installed terminal. |
 
-There are two ways to change the configuration:
+There are three ways to change the configuration. The first is recommended:
 
 ```bash
-# Edit directly, then reinstall
+# 1. From the Web settings page: Plugins -> Plugin configuration -> Desktop integration.
+#    Saving takes effect immediately.
+# 2. Edit directly, then reinstall
 $EDITOR ~/.config/dsh-desktop/config.json
 dsh plugin --profile web exec dsh-desktop install
 
-# Or change it through the CLI, which reinstalls automatically
+# 3. Or change it through the CLI, which reinstalls automatically
 dsh plugin --profile web exec dsh-desktop set window 1400x900
 ```
+
+### The settings card and config.json
+
+The card writes to DSH's `settings.yaml` (namespace `linux-desktop`), which layers **on top of** `config.json`: the effective value is schema defaults → `config.json` → the `settings.yaml` user layer. An existing `config.json` therefore keeps working and needs no migration; a field the card changed shows as "Overridden", and "Reset" drops it back to the `config.json` value.
+
+`host` and `port` are not on the card. They must match the address `dsh web` actually binds, so `config.json` remains their only source.
+
+The card depends on `@deepseek-ai/schemastery` (installed as a dependency). If you installed from a local checkout (`link:`) and that package is unavailable, the card does not appear; the rest of the desktop integration works as usual.
 
 ### profileMode
 
@@ -165,14 +176,17 @@ dsh plugin --profile web exec dsh-desktop doctor
 | The window opened in the default browser profile rather than a standalone one | A deliberate fallback: with no token and a dedicated profile directory that has never authenticated, it uses the default profile to avoid a 401. It reverts after one `dsh web` restart. |
 | Window stretches to full height and touches the top and bottom edges | The KWin rule is not active. Check whether any group in `~/.config/kwinrulesrc` has `description = DeepSeek Harness Window Rule` (the group name is a number, not that sentence), then run `qdbus6 org.kde.KWin /KWin reconfigure`. |
 | The launcher does nothing | Run `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-desktop-app` to see debug output. Logs live in `$XDG_RUNTIME_DIR/dsh-desktop-web.log`. |
+| Right-click "Open in Terminal (dsh-tui)" drops into a plain bash and prints `Could not find 'dsh'` | The entry used a bare `dsh`, and the desktop session `PATH` has no user-level bin directories. Run `dsh-desktop install --force` to regenerate the entry; the action now uses the absolute path to `dsh`. |
+| The service was just auto-started and the window takes tens of seconds to appear | Deliberate: the auto-start path waits for the `dsh web:` settled line and then for a session-API probe to succeed before opening the window. The larger the server's plugin set, the longer that wait; when the window does appear the backend is guaranteed ready. |
 | The server is still running after the window closes | You are in `shared` mode, or the service was started elsewhere and is deliberately not taken over. Use `dedicated` and start the service from the desktop icon. |
+| No "Desktop integration" card under Plugin configuration | The Host did not register the namespace. Confirm `dsh web` has been restarted and that `@deepseek-ai/schemastery` can be loaded; for a local-checkout install see "The settings card and config.json" above. |
 
 ## Development
 
 ```bash
 git clone https://github.com/ffyfox/dsh-linux-desktop.git
 cd dsh-linux-desktop
-node test/smoke.mjs                                   # smoke tests, 61 checks, zero dependencies
+node test/smoke.mjs                                   # smoke tests, 72 checks, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
 node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touches nothing real

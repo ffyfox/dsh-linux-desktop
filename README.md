@@ -12,18 +12,19 @@
 
 `dsh web` 提供完整的 Web 界面，但它在 Linux 桌面上有三处不便：没有独立的任务栏与 Alt-Tab 条目；服务生命周期依附于终端；社区的桌面类插件面向 Windows 与 macOS，没有面向 Linux XDG 桌面入口的实现。
 
-本插件补齐这三处。它做四件事：
+本插件补齐这三处。它做五件事：
 
 1. 在 `~/.local/share/applications/` 写入标准 XDG 桌面入口，使 `dsh web` 可以从程序启动器启动。
 2. 用 Chromium 的 `--app` 模式打开窗口，窗口中只有 dsh web 界面，没有地址栏、标签页或书签栏。
 3. 在 `dsh web` 未运行时启动它，并在窗口关闭后停止由自己启动的服务。
 4. 幂等地维护上述文件：`dsh web` 每次启动时同步到当前版本，内容未变化时不改动文件。
+5. 在 Web 设置页的「插件 → 插件配置」里提供一张「桌面集成」卡片，用于编辑下面那组配置。
 
 ## 系统要求
 
 - Linux
 - 一个 Chromium 系浏览器：Google Chrome、Chromium、Brave、Microsoft Edge、Vivaldi 或 Opera
-- `dsh` 已安装并位于 `PATH`
+- `dsh` 已安装（安装时会把它的绝对路径固化进启动器与右键动作，因此不要求桌面会话的 `PATH` 里能找到它）
 - 可选：`curl`（缺失时回退到 bash 内建的 `/dev/tcp` 做端口探测）
 
 Firefox 不受支持：Firefox 已移除 SSB（Site Specific Browser），无法提供无地址栏的独立窗口。降级为 `firefox --new-window` 会带回地址栏与标签页，因此本插件在该情况下直接报错，而不是静默降级。
@@ -110,16 +111,25 @@ dsh plugin --profile web exec dsh-desktop <子命令>
 | `manageKwinRules` | 是否托管 KWin 窗口规则，仅 KDE 生效。 |
 | `terminalAction` / `terminalCommand` | 桌面入口右键菜单中的「以终端界面运行」。留空则自动探测已安装的终端。 |
 
-修改配置有两种方式：
+修改配置有三种方式。推荐第一种：
 
 ```bash
-# 直接编辑后重新安装
+# 1. 在 Web 设置页里改：插件 → 插件配置 → 桌面集成。保存后立即生效。
+# 2. 直接编辑后重新安装
 $EDITOR ~/.config/dsh-desktop/config.json
 dsh plugin --profile web exec dsh-desktop install
 
-# 或用 CLI 修改，会自动重新安装
+# 3. 或用 CLI 修改，会自动重新安装
 dsh plugin --profile web exec dsh-desktop set window 1400x900
 ```
+
+### 设置页卡片与 config.json 的关系
+
+卡片写入的是 DSH 的 `settings.yaml`（命名空间 `linux-desktop`），它叠在 `config.json` **之上**：生效值 = schema 默认值 → `config.json` → `settings.yaml` 用户覆盖。因此已有的 `config.json` 继续生效，不需要迁移；卡片里改过的字段会显示「已覆盖」，点「重置」即回落到 `config.json` 的值。
+
+`host` 与 `port` 不在卡片里。它们必须与 `dsh web` 实际绑定的地址一致，只由 `config.json` 决定。
+
+卡片依赖 `@deepseek-ai/schemastery`（安装时会作为依赖装上）。若用本地检出（`link:`）方式安装且该包不可用，卡片不会出现，桌面集成其余部分照常工作。
 
 ### profileMode
 
@@ -165,14 +175,17 @@ dsh plugin --profile web exec dsh-desktop doctor
 | 窗口开在默认浏览器配置中而非独立窗口 | 有意的兜底：未取得 token 且独立配置目录从未登录时，改用默认配置以避免 401。重启一次 `dsh web` 后恢复。 |
 | 窗口纵向拉满并贴住上下边缘 | KWin 规则未生效。检查 `~/.config/kwinrulesrc` 中是否存在某一段的 `description = DeepSeek Harness Window Rule`（段名是数字，不是这句话），然后执行 `qdbus6 org.kde.KWin /KWin reconfigure`。 |
 | 启动器没有反应 | 以 `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-desktop-app` 运行查看调试输出。日志位于 `$XDG_RUNTIME_DIR/dsh-desktop-web.log`。 |
+| 右键「以终端界面运行 (dsh-tui)」打开的是一个普通 bash，并提示 `Could not find 'dsh'` | 入口里写的是裸 `dsh`，而桌面会话的 `PATH` 不含用户级 bin。执行 `dsh-desktop install --force` 刷新入口，动作会改用 `dsh` 的绝对路径。 |
+| 服务是刚由启动器拉起的，窗口要等十几秒才出现 | 有意的：自启路径会先等 `dsh web:` 落定行，再等一次会话 API 探测成功，两道都过才开窗。服务端插件集越大，这段等待越长；窗口出现时后端一定是可用的。 |
 | 关闭窗口后服务仍在运行 | 当前为 `shared` 模式，或服务由别处启动，本插件不接管。改用 `dedicated` 并从桌面图标启动服务。 |
+| 设置页「插件配置」里没有「桌面集成」卡片 | 宿主没注册命名空间。确认 `dsh web` 已重启过，且 `@deepseek-ai/schemastery` 可被加载；本地检出方式安装时见上文「设置页卡片与 config.json 的关系」。 |
 
 ## 开发
 
 ```bash
 git clone https://github.com/ffyfox/dsh-linux-desktop.git
 cd dsh-linux-desktop
-node test/smoke.mjs                                   # 冒烟测试，61 项，零依赖
+node test/smoke.mjs                                   # 冒烟测试，72 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
 node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录

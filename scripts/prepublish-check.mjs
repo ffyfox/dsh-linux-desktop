@@ -112,9 +112,11 @@ try {
     'cordis.patch.yml',
     'bin/dsh-desktop.js',
     'src/index.js',
+    'src/client.js',
+    'src/settings.js',
     'src/installer.js',
     'src/cli.js',
-    'src/assets/icon.svg',
+    'src/assets/whale-girl.png',
     'src/assets/launcher.sh.tpl',
   ]
   const missing = mustShip.filter((file) => !files.has(file))

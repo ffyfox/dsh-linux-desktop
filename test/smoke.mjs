@@ -22,8 +22,9 @@ import { detectBrowsers, detectDesktopEnvironment, findExecutable, resolveBrowse
 import { chromiumAppId, escapeExecArg, renderDesktopEntry } from '../src/desktop-entry.js'
 import { install, renderTemplate, status, uninstall } from '../src/installer.js'
 import { getKey, parseKconfig, removeSizeRule, serializeKconfig, setKey, upsertSizeRule } from '../src/kwin.js'
-import { resolvePaths } from '../src/paths.js'
+import { ICON_SIZES, iconDirFor, iconFileFor, resolvePaths } from '../src/paths.js'
 import { clearRuntime, inspectRuntime, isProcessAlive, readRuntime, writeRuntime } from '../src/runtime.js'
+import { createSettingsSchema, SETTINGS_FIELDS, SETTINGS_NAMESPACE, settingsBase } from '../src/settings.js'
 import { findListeningPid, isDshWebProcess, resolveServerTarget, stopServerProcess } from '../src/server.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -65,6 +66,12 @@ async function linuxOnly(label, fn) {
     return
   }
   await test(label, fn)
+}
+
+/** 记录一个「环境不具备条件」而主动跳过的用例 —— 跳过不是失败。 */
+function skipTest(label, reason) {
+  skipped += 1
+  process.stdout.write(`  \u001B[33m-\u001B[0m ${label} \u001B[2m（跳过：${reason}）\u001B[0m\n`)
 }
 
 function section(title) {
@@ -316,6 +323,97 @@ await test('connectHost 把 0.0.0.0 归一化为回环地址', () => {
 })
 
 // ---------------------------------------------------------------------------
+section('设置命名空间（settings.js）')
+// ---------------------------------------------------------------------------
+
+await test('卡片把窗口宽度与高度渲染在同一行（并列布局）', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src', 'client.js'), 'utf8')
+
+  // 必须有专门的并列组件，并且真的用了 sizeRow / sizeCell 两个类。
+  assert.match(source, /function SizePairControl\(/, '缺少 SizePairControl 组件')
+  assert.match(source, /className:\s*CSS\.sizeRow/, 'SizePairControl 没有使用 sizeRow')
+  assert.match(source, /className:\s*CSS\.sizeCell/, 'SizePairControl 没有使用 sizeCell')
+  assert.ok(source.includes("'.dsld_sizeRow{gap:8px;display:flex}'"), '缺少 sizeRow 的 flex 布局')
+  assert.ok(source.includes("'.dsld_sizeCell{flex:1;min-width:0;"), '缺少 sizeCell 的等宽布局')
+  // 单元格里的输入框要撑满自己的列，而不是按 flex 比例伸缩。
+  // box-sizing 必须显式写 border-box：`.dsld_input` 有 12px 左右内边距，默认的
+  // content-box 下 width:100% 会连内边距一起算出去，两个输入框会横向重叠 18px
+  //（实测：单元格 257px，输入框却渲染成 283px）。
+  assert.ok(
+    source.includes("'.dsld_sizeRow .dsld_input{width:100%;min-width:0;box-sizing:border-box}'"),
+    'sizeRow 内的输入框缺少 border-box，会溢出单元格',
+  )
+
+  // 渲染循环必须把两个 draft 合成一个控件，并且高度不再单独出一行。
+  assert.match(source, /CONTROLS\.flatMap\(/, '渲染循环未改用 flatMap')
+  assert.match(source, /if \(control\.draft === 'windowHeight'\) return \[\]/, '高度仍会单独渲染一行')
+  assert.match(source, /key: 'windowSize'/, '缺少合并后的 windowSize 控件')
+
+  // 两个 draft 仍然各自存在于 CONTROLS 里 —— 写入分组（GROUPS）依赖它们。
+  assert.ok(source.includes("draft: 'windowWidth'"), 'windowWidth 控件定义丢失')
+  assert.ok(source.includes("draft: 'windowHeight'"), 'windowHeight 控件定义丢失')
+  assert.match(source, /\{ ns: 'window', drafts: \['windowWidth', 'windowHeight'\] \}/, 'window 写入分组被改动')
+
+  // 之前留下的死代码（从未被使用的分隔符类）应已清理。
+  assert.ok(!source.includes('sizeSep'), '仍残留未被使用的 sizeSep')
+})
+
+await test('命名空间名符合 dsh-settings 的文法', () => {
+  assert.match(SETTINGS_NAMESPACE, /^[a-z][a-z0-9-]*$/, 'dsh-settings 只接受小写字母/数字/连字符')
+})
+
+await test('settingsBase 只挑进命名空间的字段', () => {
+  const config = defaultConfig()
+  const base = settingsBase(config)
+  assert.deepEqual(Object.keys(base).sort(), [...SETTINGS_FIELDS].sort())
+  assert.equal(base.profileMode, 'dedicated')
+  assert.deepEqual(base.window, { width: 1200, height: 750 })
+
+  // host / port 必须留在 config.json 里：它们要与 dsh web 实际绑定的地址一致，
+  // 放进设置卡片只会制造两份互相矛盾的真相。
+  assert.ok(!('host' in base), 'host 不应进命名空间')
+  assert.ok(!('port' in base), 'port 不应进命名空间')
+  assert.ok(!('configVersion' in base), 'configVersion 不应进命名空间')
+
+  // 缺字段时不应塞进 undefined —— 那会让 schema 的 base 层出现脏键。
+  assert.deepEqual(settingsBase({ profileMode: 'shared' }), { profileMode: 'shared' })
+})
+
+await test('schema 用真的 schemastery 构造时默认值与校验都对', async () => {
+  const dir = path.join(os.homedir(), '.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery')
+  let z
+  try {
+    z = (await import(path.join(dir, 'lib/index.mjs'))).default
+  } catch {
+    return skipTest('schema 用真的 schemastery 构造时默认值与校验都对', '宿主机上没有 @deepseek-ai/schemastery')
+  }
+  const schema = createSettingsSchema(z)
+
+  assert.deepEqual(schema({}), {
+    profileMode: 'dedicated',
+    browser: 'auto',
+    window: { width: 1200, height: 750 },
+    autoInstall: true,
+    manageKwinRules: true,
+    terminalAction: true,
+    terminalCommand: '',
+  })
+
+  // config.json 作为 base 传进来时，它的值必须压过 schema 默认值。
+  assert.equal(schema({ profileMode: 'shared', window: { width: 1400 } }).profileMode, 'shared')
+  assert.equal(schema({ window: { width: 1400 } }).window.width, 1400)
+
+  // 非法值必须在写入前被拒绝，而不是静默落库。
+  assert.throws(() => schema({ profileMode: 'bogus' }), /profileMode/)
+  assert.throws(() => schema({ window: { width: 1 } }), /width/)
+
+  // describe() 会调用 schema.toJSON()，没有它卡片列表会在服务端就炸掉。
+  const json = schema.toJSON()
+  assert.equal(typeof json, 'object')
+  assert.ok(json.refs, 'toJSON() 必须给出 schemastery 的 refs 结构')
+})
+
+// ---------------------------------------------------------------------------
 section('平台与浏览器探测')
 // ---------------------------------------------------------------------------
 
@@ -489,7 +587,9 @@ await test('install 生成全部资产', () => {
   }
   assert.ok(fs.existsSync(installPaths.launcherFile))
   assert.ok(fs.existsSync(installPaths.desktopEntryFile))
-  assert.ok(fs.existsSync(installPaths.iconScalableFile))
+  for (const size of ICON_SIZES) {
+    assert.ok(fs.existsSync(iconFileFor(installPaths.iconThemeDir, size)), `应安装 ${size}x${size} 图标`)
+  }
   assert.ok(fs.existsSync(installPaths.configFile), '安装后必须存在可编辑的配置文件')
   assert.equal(fs.statSync(installPaths.launcherFile).mode & 0o777, 0o755, '启动脚本必须可执行')
   // 断言命中的是假工具链，而不是宿主机的浏览器/dsh。
@@ -502,6 +602,66 @@ await test('install 生成全部资产', () => {
   const launcher = fs.readFileSync(installPaths.launcherFile, 'utf8')
   assert.match(launcher, new RegExp(`^DSH_BIN="${fakeToolchain.bin}/dsh"$`, 'm'), '应使用假工具链的 dsh')
 })
+
+await test('图标源是 whale-girl.png（位图），旧的矢量图标已移除', () => {
+  const asset = path.join(ROOT, 'src', 'assets', 'whale-girl.png')
+  assert.ok(fs.existsSync(asset), `图标源必须存在：${asset}`)
+  assert.ok(!fs.existsSync(path.join(ROOT, 'src', 'assets', 'icon.svg')), '0.2.0 起不再使用矢量图标源')
+
+  const buf = fs.readFileSync(asset)
+  assert.equal(buf.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', '必须是 PNG')
+  // IHDR 紧跟在 8 字节签名 + 4 字节长度 + 4 字节类型之后。
+  const width = buf.readUInt32BE(16)
+  const height = buf.readUInt32BE(20)
+  assert.equal(width, Math.max(...ICON_SIZES), '源图边长应等于最大档位，那一档才能免转换器直接复制')
+  assert.equal(height, Math.max(...ICON_SIZES))
+})
+
+await test('最大档位由源图直接复制，app_id 别名与主图标一致', () => {
+  const entry = fs.readFileSync(installPaths.desktopEntryFile, 'utf8')
+  const appId = /^StartupWMClass=(.+)$/m.exec(entry)[1].trim()
+  const source = fs.readFileSync(path.join(ROOT, 'src', 'assets', 'whale-girl.png'))
+  const biggest = Math.max(...ICON_SIZES)
+
+  // 沙箱的 PATH 里没有 ImageMagick，小档位会被跳过；但最大档位是纯复制，
+  // 必须无条件存在 —— 这条锁死「没有转换器时图标仍然解析得到」这个承诺。
+  const main = iconFileFor(installPaths.iconThemeDir, biggest)
+  assert.ok(fs.existsSync(main), '最大档位必须无条件安装（不需要任何外部转换器）')
+  assert.deepEqual(fs.readFileSync(main), source, '源尺寸档位应与源图逐字节一致')
+
+  const alias = path.join(iconDirFor(installPaths.iconThemeDir, biggest), `${appId}.png`)
+  assert.ok(fs.existsSync(alias), 'app_id 别名图标必须存在，否则合成器会退回通用占位图标')
+  assert.deepEqual(fs.readFileSync(alias), source, '别名必须与主图标字节一致')
+})
+
+const RASTER_TOOL = ['magick', 'convert', 'ffmpeg'].find((cmd) => findExecutable(cmd))
+
+if (RASTER_TOOL) {
+  await test('有转换器时所有档位都按正确像素尺寸安装', () => {
+    const dir = makeSandbox('icon-sizes')
+    const paths = resolvePaths({ HOME: dir, DSH_DESKTOP_ROOT: dir })
+    // 真实 PATH 接在假工具链后面：既保留假 dsh / 假浏览器，又能找到转换器。
+    const env = {
+      ...process.env,
+      DSH_DESKTOP_ROOT: dir,
+      PATH: `${fakeToolchain.pathValue}${path.delimiter}${process.env.PATH ?? ''}`,
+    }
+    const result = install({ paths, env, quiet: true })
+    assert.equal(result.ok, true, 'install 应成功')
+
+    for (const size of ICON_SIZES) {
+      const file = iconFileFor(paths.iconThemeDir, size)
+      assert.ok(fs.existsSync(file), `${size}x${size} 档位应存在（转换器：${RASTER_TOOL}）`)
+      const buf = fs.readFileSync(file)
+      assert.equal(buf.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', `${size} 档位必须是 PNG`)
+      assert.equal(buf.readUInt32BE(16), size, `${size} 档位宽度`)
+      assert.equal(buf.readUInt32BE(20), size, `${size} 档位高度`)
+    }
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+} else {
+  skipTest('有转换器时所有档位都按正确像素尺寸安装', '宿主机没有位图缩放工具')
+}
 
 await test('即使调用方显式传入配置，也会落盘一份供用户编辑', () => {
   const dir = makeSandbox('config-write')
@@ -525,6 +685,154 @@ await test('install 幂等：第二次没有任何 created/updated', () => {
 
 await test('生成的启动脚本能通过 bash 语法检查', () => {
   execFileSync('bash', ['-n', installPaths.launcherFile], { stdio: 'pipe' })
+})
+
+await test('后台运行通知已精简，旧的冗长文案不再存在', () => {
+  const template = fs.readFileSync(path.join(ROOT, 'src', 'assets', 'launcher.sh.tpl'), 'utf8')
+  // 0.1.x 的原文（三行、含「为什么不停」的解释）。它必须彻底消失 ——
+  // 逐字符比对，不做模糊匹配。
+  const legacy = '窗口已关闭，但 dsh web 仍在后台运行。\\n它是从终端或其它方式启动的，'
+    + '桌面启动器不会去停它（避免误杀你自己的服务）。\\n要停止请执行：dsh-desktop stop'
+  assert.ok(!template.includes(legacy), '模板里仍残留 0.1.x 的长文案')
+  // 0.2.0 早期版本的两行文案（第一句在正文里）。也必须消失，否则说明
+  // 「第一句提到标题」这一步没做。
+  const twoLineBody = 'dsh web 服务仍在后台运行。\\n停止：dsh-desktop stop'
+  assert.ok(!template.includes(twoLineBody), '模板里仍把第一句留在正文中')
+
+  // 第一句走通知标题（唯一能拿到「较大较粗」字样的字段），去掉句号；
+  // 第二句原样留在正文。
+  assert.ok(
+    template.includes('notify "dsh web 服务仍在后台运行" \\\n      "停止：dsh-desktop stop" low'),
+    '模板里缺少「第一句作标题、第二句作正文」的通知',
+  )
+  assert.ok(!template.includes('dsh web 服务仍在后台运行。'), '第一句不应再带句号')
+  assert.ok(template.includes('停止：dsh-desktop stop'), '第二句必须保持不变')
+
+  // 渲染后的启动脚本同样如此。
+  const rendered = fs.readFileSync(installPaths.launcherFile, 'utf8')
+  assert.ok(!rendered.includes(legacy), '生成的启动脚本里仍残留旧文案')
+  assert.ok(rendered.includes('"dsh web 服务仍在后台运行"'), '生成的启动脚本里缺少标题形式的通知')
+  assert.ok(rendered.includes('"停止：dsh-desktop stop"'), '生成的启动脚本里缺少停止命令正文')
+})
+
+await test('启动器在开窗前等待 Loader 树落定（冷启动空侧栏的根因修复）', () => {
+  const template = fs.readFileSync(path.join(ROOT, 'src', 'assets', 'launcher.sh.tpl'), 'utf8')
+
+  // 就绪判据必须是 dsh-web-app 在整棵树加载完之后打印的那一行。
+  assert.match(template, /server_settled\(\)\s*\{[^}]*grep -q '\^dsh web: '/s, '缺少 Loader 树落定的判据')
+
+  // 主路径：先 wait_settled，再 resolve_url —— 顺序不能反。反了就会立刻命中
+  // 插件「尽早发布」的运行时文件，窗口又会在服务端没就绪时打开。
+  const main = template.slice(template.indexOf('if [ "$STARTED_BY_US" = "1" ]; then'))
+  const settledAt = main.indexOf('wait_settled 120')
+  const urlAt = main.indexOf('TARGET_URL="$(resolve_url 30)"')
+  assert.ok(settledAt >= 0, '自启路径缺少 wait_settled')
+  assert.ok(urlAt >= 0, '自启路径缺少 resolve_url')
+  assert.ok(settledAt < urlAt, 'wait_settled 必须在 resolve_url 之前调用')
+
+  // 第二道闸门：树落定之后、开窗之前，还要确认会话 API 真的能应答。
+  const apiAt = main.indexOf('wait_api_ready "$TARGET_URL"')
+  assert.ok(apiAt >= 0, '自启路径缺少 wait_api_ready')
+  assert.ok(apiAt > urlAt, 'wait_api_ready 必须在 resolve_url 之后调用（它需要带 token 的地址）')
+  assert.match(template, /api_ready\(\)\s*\{/, '缺少 api_ready 实现')
+  assert.match(template, /session\/list/, 'api_ready 没有探测会话列表接口')
+  assert.match(template, /'"ok":true'/, 'api_ready 没有校验 RPC 成功标志')
+  // 探测用的 cookie 罐必须清掉，不能留在运行时目录里。
+  assert.match(template, /rm -f "\$RUNTIME_DIR\/\.probe-cookies"/, '缺少 cookie 罐清理')
+
+  // 单实例锁的补开窗口分支也要等，否则第二个窗口同样是空侧栏。
+  const lockBranch = template.slice(template.indexOf('! flock -n 9'), template.indexOf('STARTED_BY_US=0'))
+  assert.ok(lockBranch.includes('wait_settled'), '补开窗口的分支没有等待落定')
+
+  // 复用别人已跑着的服务时不能白等满超时。
+  assert.match(template, /log_is_fresh\(\)/, '缺少「日志是不是本次产生的」判断')
+
+  // 渲染后的脚本也要能通过语法检查（本文件末尾另有 bash -n 测试覆盖）。
+  const rendered = fs.readFileSync(installPaths.launcherFile, 'utf8')
+  assert.ok(rendered.includes('wait_settled 120'), '生成的启动脚本里缺少 wait_settled')
+  assert.ok(rendered.includes('log_is_fresh'), '生成的启动脚本里缺少 log_is_fresh')
+})
+
+await linuxOnly('桌面入口的终端动作内嵌 dsh 绝对路径，不依赖桌面会话 PATH', () => {
+  const content = fs.readFileSync(installPaths.desktopEntryFile, 'utf8')
+  const exec = content.match(/^Exec=(.*)$/m)?.[1] ?? ''
+  const action = content.match(/^\[Desktop Action TUI\][\s\S]*?^Exec=(.*)$/m)?.[1]
+
+  if (!action) {
+    // 没装终端时该动作会被省略，这是允许的降级。
+    assert.ok(
+      !content.includes('[Desktop Action TUI]'),
+      'Actions 声明存在但动作段缺失',
+    )
+    return
+  }
+  assert.ok(
+    /(^|\s)\/\S*dsh(\s|$)/.test(action),
+    `终端动作里的 dsh 必须是绝对路径，实际为：${action}`,
+  )
+  assert.ok(!/(^|\s)dsh\s/.test(action), `终端动作里不应出现裸 dsh：${action}`)
+  assert.match(action, /--profile dsh-tui/, '终端动作应启动 dsh-tui profile')
+  assert.ok(exec.length > 0, '主 Exec 不应为空')
+})
+
+await test('根目录不再有 whale-girl.png，也没有任何引用指向它', () => {
+  const assetRel = path.join('src', 'assets', 'whale-girl.png')
+  const rootFile = path.join(ROOT, 'whale-girl.png')
+
+  // 1) 根目录那份（用户的原始画稿）已删除。
+  assert.ok(!fs.existsSync(rootFile), '仓库根目录仍存在 whale-girl.png')
+  // 2) 进包的那份（512x512）仍在。
+  assert.ok(fs.existsSync(path.join(ROOT, assetRel)), '缺少 src/assets/whale-girl.png')
+
+  // 3) 全仓库扫描「指向根目录那份」的**路径形式**引用。
+  //
+  // 只认路径，不认散文：CHANGELOG / README 里用反引号写的 `whale-girl.png`
+  // 是在称呼这个资源，不是一条会失效的路径。所以这里匹配的是带路径分隔符
+  // 或路径拼接语境的写法。
+  const absRoot = path.join(ROOT, 'whale-girl.png') // 绝对路径
+  const patterns = [
+    { name: '绝对路径', test: (line) => line.includes(absRoot) },
+    { name: './ 相对路径', test: (line) => /(^|[^/\w])\.\/whale-girl\.png/.test(line) },
+    { name: 'ROOT 拼接', test: (line) => /ROOT\s*,\s*['"]whale-girl\.png['"]/.test(line) },
+    { name: '根相对引用', test: (line) => /['"](?:\.\/)?whale-girl\.png['"]/.test(line) && !/assets/i.test(line) },
+  ]
+
+  const offenders = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue
+      // test/ 不进包（见 package.json 的 files 白名单），而且本文件自己就要
+      // 构造一次根路径来判断「它不存在」，那不算引用。
+      if (dir === ROOT && entry.name === 'test') continue
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) { walk(full); continue }
+      // 图标资源本身不是「引用」。
+      if (full === path.join(ROOT, assetRel)) continue
+      let text
+      try { text = fs.readFileSync(full, 'utf8') } catch { continue }
+      text.split('\n').forEach((line, index) => {
+        if (!line.includes('whale-girl')) return
+        // src/assets 下的引用是合法的，跳过。
+        if (line.includes('src/assets/whale-girl') || /assets['"]?\s*,\s*['"]whale-girl/.test(line)) return
+        for (const pattern of patterns) {
+          if (pattern.test(line)) {
+            offenders.push(`${path.relative(ROOT, full)}:${index + 1} [${pattern.name}] ${line.trim().slice(0, 120)}`)
+            break
+          }
+        }
+      })
+    }
+  }
+  walk(ROOT)
+  assert.deepEqual(offenders, [], `仍有指向根目录 whale-girl.png 的引用：\n${offenders.join('\n')}`)
+
+  // 4) 安装器取图标的位置必须落在 src/assets 里。
+  const installer = fs.readFileSync(path.join(ROOT, 'src', 'installer.js'), 'utf8')
+  assert.match(installer, /path\.join\(ASSETS_DIR,\s*'whale-girl\.png'\)/, '安装器没有从 ASSETS_DIR 取图标')
+  assert.ok(
+    !/path\.join\([^)]*ROOT[^)]*'whale-girl\.png'/.test(installer),
+    '安装器仍在引用仓库根目录的 whale-girl.png',
+  )
 })
 
 await test('生成的 .desktop 能通过 desktop-file-validate', () => {
@@ -561,7 +869,9 @@ await test('uninstall 清理托管文件但保留备份', () => {
   assert.ok(result.removed.length > 0)
   assert.ok(!fs.existsSync(installPaths.launcherFile))
   assert.ok(!fs.existsSync(installPaths.desktopEntryFile))
-  assert.ok(!fs.existsSync(installPaths.iconScalableFile))
+  for (const size of ICON_SIZES) {
+    assert.ok(!fs.existsSync(iconFileFor(installPaths.iconThemeDir, size)), `应清理 ${size}x${size} 图标`)
+  }
   assert.ok(fs.existsSync(`${installPaths.launcherFile}.dsh-backup`), '备份不应被删除')
 })
 

@@ -1,12 +1,13 @@
 {
   "name": "dsh-linux-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness 的 Linux 原生桌面集成：XDG 桌面入口、纯净无边框独立窗口、随窗退出的服务生命周期管理。",
   "type": "module",
   "license": "MIT",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./client": "./src/client.js",
     "./cli": "./src/cli.js",
     "./package.json": "./package.json"
   },
@@ -34,7 +35,17 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*"

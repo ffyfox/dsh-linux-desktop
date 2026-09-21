@@ -100,6 +100,16 @@ token_from_log() {
   printf '%s' "$url"
 }
 
+# 服务端 Loader 树是否已经落定。
+#
+# 判据是 `dsh web: <url>` 这一行 —— 它由 dsh-web-app 在整棵插件树加载完之后才
+# 打印。这是**唯一**可靠的就绪信号：HTTP 端口在第一个插件激活时就 bind 了，
+# 但此时工作区 / 会话等 API 控制器可能还没注册。
+server_settled() {
+  [ -f "$LOG_FILE" ] || return 1
+  grep -q '^dsh web: ' "$LOG_FILE" 2>/dev/null
+}
+
 # 单次尝试：插件写的运行时文件 → 启动日志。
 resolve_url_once() {
   local url
@@ -129,6 +139,99 @@ resolve_url() {
   done
   # 兜底：裸地址。cookie 仍在有效期（默认 30 天）时依然可用。
   printf 'http://%s:%s/' "$HOST" "$PORT"
+}
+
+# 日志文件是否是「刚刚由启动器写下的」。
+#
+# 用来区分两种「服务在跑」：我们自己刚拉起的（start_server 会截断日志 → mtime 很新）
+# 与用户在终端里早就启好的（日志要么不存在，要么是上一次留下的）。后者等下去也
+# 等不到新的 `dsh web:` 行，只会白等满超时。
+log_is_fresh() {
+  [ -f "$LOG_FILE" ] || return 1
+  find "$LOG_FILE" -newermt '-5 minutes' -print -quit 2>/dev/null | grep -q .
+}
+
+# 等 Loader 树落定。
+#
+# **这是「冷启动打开桌面端，侧栏里一个工作区都没有、像全新安装」的根因修复。**
+#
+# 实测（该用户完整插件集，15 个 bundle）：端口 3.0 秒可连，插件行 4.1 秒就把
+# 运行时文件写出来了，但整棵树要到 **33.7 秒**才落定。而运行时文件是「尽早发布」
+# 的，`resolve_url` 会立刻命中它 —— 于是窗口在服务端刚起来 4 秒时就打开了，
+# 比工作区 / 会话这些 API 控制器注册完早了近 30 秒。前端在那时发起的首屏请求
+# 拿不到数据，就会渲染成空侧栏，而且不会自己重试。
+#
+# 复用别人的服务时不需要等（那棵树早就落定了），所以由 log_is_fresh 兜住。
+#
+# @param $1 最长等待秒数
+wait_settled() {
+  local timeout="$1"
+  if ! log_is_fresh; then
+    log "启动日志不是本次产生的，跳过等待 Loader 树"
+    return 1
+  fi
+  local attempts=$(( timeout * 4 ))
+  local i
+  for i in $(seq 1 "$attempts"); do
+    server_settled && return 0
+    # 服务已经死了就不必空等。
+    if [ -n "$SERVER_PID" ] && ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      log "等待 Loader 树时服务已退出"
+      return 1
+    fi
+    sleep 0.25
+  done
+  log "等待 Loader 树落定超时（${timeout}s），仍继续开窗"
+  return 1
+}
+
+# 用一次真实的鉴权 API 调用确认「后端现在能列出会话」。
+#
+# 为什么在 wait_settled 之外还要这一步：树落定只说明插件都加载完了，而用户看到
+# 的是**会话列表**。这里直接问一句「现在能不能列出会话」—— 前端首屏要的就是这个
+# 答案。两道闸门都过，才可以说「打开窗口时后端真的可用了」。
+#
+# 安全性：launch token 可以重复交换（实测连续 3 次都是 303 + 种 cookie），所以
+# 这里先换 cookie 不会把 token 用掉、不影响随后浏览器自己再换一次。
+#
+# 没有 curl 时返回 1（调用方退回「只等树落定」）。
+#
+# @param $1 带 token 的地址
+api_ready() {
+  local url="$1"
+  [ -n "$CURL" ] || return 1
+  case "$url" in *token=*) ;; *) return 1 ;; esac
+
+  local jar="$RUNTIME_DIR/.probe-cookies"
+  "$CURL" -s -o /dev/null -m 5 -c "$jar" "$url" 2>/dev/null || true
+
+  local body
+  body="$("$CURL" -s -m 5 -b "$jar" -H 'content-type: application/json' \
+    -d '{"type":"client-request","rpcId":"dsh-desktop-probe","method":"session/list","payload":{"args":{"_request":{}}}}' \
+    "http://$HOST:$PORT/api/session/list" 2>/dev/null)" || true
+
+  case "$body" in *'"ok":true'*) return 0 ;; esac
+  return 1
+}
+
+# 轮询等待会话 API 真正可用。
+#
+# @param $1 带 token 的地址
+# @param $2 最长等待秒数
+wait_api_ready() {
+  local url="$1" timeout="$2"
+  local attempts=$(( timeout * 2 ))
+  local i
+  for i in $(seq 1 "$attempts"); do
+    api_ready "$url" && { log "会话 API 已就绪"; return 0; }
+    if [ -n "$SERVER_PID" ] && ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      log "等待会话 API 时服务已退出"
+      return 1
+    fi
+    sleep 0.5
+  done
+  log "等待会话 API 就绪超时（${timeout}s），仍继续开窗"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -231,7 +334,13 @@ fi
 
 if [ "$LOCK_OK" = "1" ] && ! flock -n 9; then
   log "已有实例在管理生命周期，只补开窗口"
-  open_window "$(resolve_url 5)"
+  # 那个实例可能正在拉起服务（树还没落定）。等一等，否则这个窗口同样会
+  # 渲染成空侧栏。日志不是本次产生的（服务早就跑着）时 wait_settled 会立刻返回。
+  wait_settled 120 || true
+  SECOND_URL="$(resolve_url 5)"
+  wait_api_ready "$SECOND_URL" 20 || true
+  rm -f "$RUNTIME_DIR/.probe-cookies" 2>/dev/null || true
+  open_window "$SECOND_URL"
   exit 0
 fi
 
@@ -252,7 +361,14 @@ fi
 # 我们自己启的服务：等它打印 token（Loader 树落定需要几秒）。
 # 复用别人的服务：只短暂等一下运行时文件，拿不到就用裸地址（依赖已有 cookie）。
 if [ "$STARTED_BY_US" = "1" ]; then
+  # 先等整棵树落定，再取地址 —— 顺序不能反。若先取地址，会立刻命中插件「尽早
+  # 发布」的运行时文件，窗口就在服务端还没就绪时打开了（见 wait_settled 注释）。
+  # 120 秒上限是实测 33.7 秒的约 3.5 倍余量；轮询是即时的，放宽不会拖慢正常路径。
+  wait_settled 120 || true
   TARGET_URL="$(resolve_url 30)"
+  # 再过一道「会话 API 真的能应答」的闸门，然后清掉探测用的 cookie 罐。
+  wait_api_ready "$TARGET_URL" 30 || true
+  rm -f "$RUNTIME_DIR/.probe-cookies" 2>/dev/null || true
 else
   TARGET_URL="$(resolve_url 3)"
 fi
@@ -293,8 +409,14 @@ if [ "$STARTED_BY_US" != "1" ]; then
   # 「关窗即停」，静默不生效才叫意外；shared 模式下服务常驻是约定行为，
   # 每次都弹通知只会变成噪音。
   if [ "$PROFILE_MODE" = "dedicated" ]; then
-    notify "DeepSeek Harness" \
-      "窗口已关闭，但 dsh web 仍在后台运行。\n它是从终端或其它方式启动的，桌面启动器不会去停它（避免误杀你自己的服务）。\n要停止请执行：dsh-desktop stop" low
+    # 「仍在后台运行」这一句走**通知标题**，不走正文。
+    #
+    # 原因：FreeDesktop 通知的正文标记（body-markup）只支持 <b>/<i>/<u>/<a>/<img>，
+    # **没有字号**。唯一能让一段文字「较大且较粗」的字段就是 summary（标题）——
+    # KDE Plasma、GNOME、dunst 都会把标题渲染得比正文更大更粗。所以第一句放标题、
+    # 去掉句号；第二句原样留在正文。
+    notify "dsh web 服务仍在后台运行" \
+      "停止：dsh-desktop stop" low
   fi
   exit 0
 fi

@@ -3,6 +3,54 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.2.0] - 2026-09-20
+
+桌面集成第一次拥有图形配置界面，并换上了自己的图标。
+
+### 新增
+
+- **Web 设置页的「桌面集成」卡片**（`src/settings.js` + `src/client.js`）
+  - 宿主半侧注册 settings 命名空间 `linux-desktop`，分层为「schema 默认值 → `config.json` → `settings.yaml` 用户覆盖」，因此 0.1.x 已有的配置文件**继续生效**。
+  - 浏览器半侧是手写的 lazy-CJS factory bundle（`dsh.client` + `exports["./client"]`），把卡片注册进 keyed slot `settings.plugin.item` 的 `linux-desktop` 键。不引入构建步骤，与本项目「纯 ESM、零构建」一致。
+  - 卡片可编辑 `profileMode` / `browser` / 窗口尺寸 / `autoInstall` / `manageKwinRules` / `terminalAction` / `terminalCommand`，逐字段显示「已覆盖」并提供重置。保存后触发幂等安装，改动立即生效。
+  - `host` 与 `port` **刻意不进命名空间**：它们必须与 `dsh web` 实际绑定的地址一致，放进卡片只会制造两份矛盾的真相。
+  - 新增运行期依赖 `@deepseek-ai/schemastery`（仅用于注册命名空间）。本地 `link:` 方式安装时 pnpm 不解析被链接包的依赖，因此 `src/settings.js` 还带一条退路：从正在运行的 `dsh` 安装目录里加载它；两条路都不通时安静降级为「没有卡片」，其余功能不受影响。
+
+### 变更
+
+- **桌面集成图标换成 `whale-girl.png`**（`src/assets/whale-girl.png`，512×512 位图）
+  - 图标源从矢量改为位图，因此不再安装 `hicolor/scalable` 下的 SVG，改为写入 128 / 256 / 512 三档位图，app_id 别名图标同步。
+  - 源尺寸那一档是纯复制，不需要任何外部转换器 —— 即使系统上没有 ImageMagick，`Icon=deepseek-harness` 也一定能解析到；更小的档位才尽力缩放。
+  - 卸载时会一并清理 0.1.x 留下的旧 SVG，否则图标主题可能继续命中旧图。
+- **精简「后台运行」通知文案**：原文三行解释「为什么不停」，改为两行 —— 服务仍在后台运行，并给出停止命令。
+
+### 修复
+
+- **桌面入口右键的「以终端界面运行 (dsh-tui)」点了没反应**（`src/installer.js`）
+  - 原因：动作写的是裸 `dsh`，而桌面入口由桌面环境经 systemd 用户会话启动，那里的 `PATH` 只有 `/usr/local/bin:/usr/bin:...`，**不含** `~/.npm-global/bin`。终端找不到 `dsh`，于是打印 `Warning: Could not find 'dsh', starting '/usr/bin/bash' instead.` 并退化成一个普通 bash。
+  - 改为内嵌 `dsh` 的绝对路径（经 `resolveDshBin` 解析，独立 token 位置按 FreeDesktop 规则转义），从此与 `PATH` 无关。实测：旧形式在桌面 `PATH` 下 `command not found`（退出码 127），新形式正常进入 dsh-tui。
+
+- **未启动服务时打开桌面端，侧栏里没有任何工作区，像全新安装**（`src/assets/launcher.sh.tpl`）
+  - 原因：启动器拿到「带 token 的地址」就立刻开窗，而插件是**尽早发布**运行时文件的 —— 端口 ~3.0 秒可连、运行时文件 ~4.1 秒就出现，但服务端整棵 Loader 树要晚得多才落定。窗口比工作区 / 会话这些 API 控制器注册完早开了一大截，前端首屏请求拿不到数据就渲染成空侧栏，而且不会自己重试。
+  - 自启路径改为**两道闸门**：先等 `dsh web:` 那一行（dsh-web-app 在整棵树加载完之后才打印），再等一次真实的鉴权 API 调用成功（`POST /api/session/list` 返回 `"ok":true`）。两道都过才开窗。
+  - 复用别人已跑着的服务时不会白等：用 `log_is_fresh` 判断日志是不是本次产生的，不是就立刻返回。
+  - 探测用的 cookie 罐用完即删。launch token 可重复交换（实测连续 3 次都是 303 + 种 cookie），因此探测不会把 token 用掉。
+
+- **设置卡片里「窗口宽度」「窗口高度」不在同一行**（`src/client.js`）
+  - 两个值本来属于同一个 `window` 对象，拆成上下两行既浪费纵向空间，也看不出它们是一对。现在合成一行两个等宽单元格，各自保留标签、覆盖徽标与重置按钮，提示与校验信息在整行下方共用。
+  - 一并修掉一个布局细节：单元格里的输入框必须显式 `box-sizing:border-box`。`.dsld_input` 有 12px 左右内边距，默认的 `content-box` 下 `width:100%` 会连内边距一起算出去，两个输入框会横向重叠 18px（实测单元格 257px，输入框却渲染成 283px）。
+
+- **关窗通知的第一句不够醒目**（`src/assets/launcher.sh.tpl`）
+  - 「dsh web 服务仍在后台运行」改为走**通知标题**并去掉句号，第二句「停止：dsh-desktop stop」原样留在正文。
+  - 之所以用标题而不是正文标记：FreeDesktop 通知的正文标记只支持 `<b>/<i>/<u>/<a>/<img>`，**没有字号**；唯一能让一段文字「较大且较粗」的字段就是 summary，KDE Plasma、GNOME、dunst 都会把标题渲染得比正文更大更粗。
+
+- **仓库根目录的 `whale-girl.png` 已删除**，并清理了唯一一处指向它的引用（Dolphin 的 `.directory` 文件夹图标设置）。`.directory` 记录的是本机绝对路径，已加进 `.gitignore`。进包的那份 `src/assets/whale-girl.png`（512×512）不受影响。
+
+### 已知限制
+
+- 设置页卡片需要 `@deepseek-ai/schemastery`。本地 `link:` 安装且找不到该包时，卡片不会出现（桌面集成本身照常工作）。
+- 卡片暂不提供安装状态的只读展示（app_id、探测到的浏览器、启动器路径），仍由 `dsh-desktop status` / `doctor` 负责。
+
 ## [0.1.0] - 2026-09-20
 
 首个可用版本。

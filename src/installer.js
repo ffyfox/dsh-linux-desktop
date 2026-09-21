@@ -19,9 +19,9 @@ import { fileURLToPath } from 'node:url'
 
 import { connectHost, defaultConfig, normalizeConfig, readConfig, writeConfig } from './config.js'
 import { detectDesktopEnvironment, findExecutable, isLinux, resolveBrowser } from './detect.js'
-import { aliasEntryFilename, aliasIconName, chromiumAppId, renderAliasEntry, renderDesktopEntry } from './desktop-entry.js'
+import { aliasEntryFilename, aliasIconName, chromiumAppId, escapeExecArg, renderAliasEntry, renderDesktopEntry } from './desktop-entry.js'
 import { reconfigureKwin, removeSizeRule, upsertSizeRule } from './kwin.js'
-import { ICON_NAME, resolvePaths } from './paths.js'
+import { ICON_NAME, ICON_SIZES, iconDirFor, iconFileFor, resolvePaths } from './paths.js'
 import { inspectRuntime } from './runtime.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -83,13 +83,23 @@ function writeManagedFile(file, content, { mode = 0o644 } = {}) {
   return { status: isSymlink || existing !== null ? 'updated' : 'created', backup }
 }
 
-/** 尽力把 SVG 转成 PNG；没有任何转换器就返回 null。 */
-function svgToPng(svgFile, pngFile) {
+/**
+ * 把位图图标缩放到指定边长；没有任何转换器就返回 null。
+ *
+ * 源图是位图，所以能用的转换器和矢量的那套不同（rsvg-convert / Inkscape 只
+ * 吃 SVG）。调用方只对**非源尺寸**的档位调用它 —— 源尺寸那一档直接复制。
+ *
+ * @param {string} srcFile 源 PNG。
+ * @param {string} pngFile 目标 PNG。
+ * @param {number} size 目标边长（像素）。
+ * @returns {string | null} 实际用上的转换器名。
+ */
+function resizePng(srcFile, pngFile, size) {
+  const box = `${size}x${size}`
   const attempts = [
-    ['magick', [svgFile, '-background', 'none', '-resize', '128x128', pngFile]],
-    ['convert', [svgFile, '-background', 'none', '-resize', '128x128', pngFile]],
-    ['rsvg-convert', ['-w', '128', '-h', '128', '-o', pngFile, svgFile]],
-    ['inkscape', [svgFile, '-w', '128', '-h', '128', '-o', pngFile]],
+    ['magick', [srcFile, '-background', 'none', '-resize', box, pngFile]],
+    ['convert', [srcFile, '-background', 'none', '-resize', box, pngFile]],
+    ['ffmpeg', ['-y', '-loglevel', 'error', '-i', srcFile, '-vf', `scale=${size}:${size}`, pngFile]],
   ]
   // 转换器不会自己创建输出目录；hicolor/128x128/apps 在干净系统上通常不存在。
   fs.mkdirSync(path.dirname(pngFile), { recursive: true })
@@ -105,7 +115,7 @@ function svgToPng(svgFile, pngFile) {
   return null
 }
 
-/** 文件修改时间（毫秒）；不存在返回 0。 */
+/** 文件修改时间（毫秒）；不存在返回 0（用于判断资源是否比产物新）。 */
 function mtimeMs(file) {
   try {
     return fs.statSync(file).mtimeMs
@@ -153,16 +163,35 @@ export function resolveDshBin(env = process.env) {
   return null
 }
 
-/** 探测一个可用的终端命令，用于桌面入口的右键动作。 */
-function detectTerminalCommand(env) {
+/**
+ * 探测一个可用的终端命令，用于桌面入口的右键动作。
+ *
+ * **必须用 `dsh` 的绝对路径，不能只写 `dsh`。** 桌面入口是由桌面环境
+ * （KDE/GNOME）通过 systemd 用户会话启动的，那里的 `PATH` 只有
+ * `/usr/local/bin:/usr/bin:...` 这类系统目录 —— **不含** `~/.npm-global/bin`、
+ * `~/.local/bin` 等用户级 bin。只写 `dsh` 时终端找不到它，会打印
+ * `Warning: Could not find 'dsh', starting '/usr/bin/bash' instead.` 并退化成一个
+ * 普通 bash，用户看到的就是「右键菜单点了没反应」。
+ *
+ * 绝对路径与 `PATH` 无关，因此在任何桌面会话里都能启动。
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string|null} dshBin `dsh` 的绝对路径；为 null 时退回裸 `dsh`（会带警告）。
+ * @returns {string}
+ */
+function detectTerminalCommand(env, dshBin) {
+  const bin = dshBin || 'dsh'
+  // 独立成 token 的位置用 escapeExecArg（含空格的家目录路径需要引号）；
+  // xfce4-terminal 的 -e 本身就要一层双引号，所以那里直接放原值。
+  const quoted = escapeExecArg(bin)
   const candidates = [
-    ['konsole', (t) => `${t} -e dsh --profile dsh-tui`],
-    ['gnome-terminal', (t) => `${t} -- dsh --profile dsh-tui`],
-    ['xfce4-terminal', (t) => `${t} -e "dsh --profile dsh-tui"`],
-    ['kitty', (t) => `${t} dsh --profile dsh-tui`],
-    ['alacritty', (t) => `${t} -e dsh --profile dsh-tui`],
-    ['wezterm', (t) => `${t} start -- dsh --profile dsh-tui`],
-    ['xterm', (t) => `${t} -e dsh --profile dsh-tui`],
+    ['konsole', (t) => `${t} -e ${quoted} --profile dsh-tui`],
+    ['gnome-terminal', (t) => `${t} -- ${quoted} --profile dsh-tui`],
+    ['xfce4-terminal', (t) => `${t} -e "${bin} --profile dsh-tui"`],
+    ['kitty', (t) => `${t} ${quoted} --profile dsh-tui`],
+    ['alacritty', (t) => `${t} -e ${quoted} --profile dsh-tui`],
+    ['wezterm', (t) => `${t} start -- ${quoted} --profile dsh-tui`],
+    ['xterm', (t) => `${t} -e ${quoted} --profile dsh-tui`],
   ]
   for (const [cmd, build] of candidates) {
     const found = findExecutable(cmd, env)
@@ -255,43 +284,66 @@ export function install(options = {}) {
   record('app-id', 'ok', appId)
 
   // ---- 图标 -------------------------------------------------------------
-  const svgSource = path.join(ASSETS_DIR, 'icon.svg')
-  if (!fs.existsSync(svgSource)) {
-    record('icon', 'failed', `内置图标资源缺失：${svgSource}`)
+  // 图标源是位图（`src/assets/whale-girl.png`，512x512）。位图没有「一个文件
+  // 任意缩放」这回事，所以按 hicolor 的尺寸目录逐个写入：源尺寸那一档直接复制
+  // （不需要任何外部转换器，保证 Icon= 一定能解析到），其余档位尽力缩放。
+  const iconSource = path.join(ASSETS_DIR, 'whale-girl.png')
+  if (!fs.existsSync(iconSource)) {
+    record('icon', 'failed', `内置图标资源缺失：${iconSource}`)
     return { ok: false, steps, warnings, changed: false, appId, browser, paths }
   }
-  const svgContent = fs.readFileSync(svgSource, 'utf8')
+  const sourceSize = Math.max(...ICON_SIZES)
 
   try {
-    const main = writeManagedFile(paths.iconScalableFile, svgContent)
-    record('icon-svg', main.status, paths.iconScalableFile)
+    let installedSizes = 0
+    for (const size of ICON_SIZES) {
+      const target = iconFileFor(paths.iconThemeDir, size)
+      const aliasTarget = path.join(iconDirFor(paths.iconThemeDir, size), `${aliasIconName(appId)}.png`)
 
-    // app_id 别名图标：合成器找不到它就会退回黄色通用 Wayland 占位图标。
-    const aliasSvg = path.join(paths.iconScalableDir, `${aliasIconName(appId)}.svg`)
-    const alias = writeManagedFile(aliasSvg, svgContent)
-    record('icon-svg-alias', alias.status, aliasSvg)
-
-    const pngTarget = path.join(paths.iconBitmapDir, `${ICON_NAME}.png`)
-    const aliasPng = path.join(paths.iconBitmapDir, `${aliasIconName(appId)}.png`)
-    // 位图转换有成本（要起一个外部进程），所以只在缺失或源 SVG 更新时才做。
-    const pngStale = !fs.existsSync(pngTarget) || mtimeMs(svgSource) > mtimeMs(pngTarget)
-    if (pngStale) {
-      const converted = svgToPng(svgSource, pngTarget)
-      if (converted) {
-        record('icon-png', 'created', `${pngTarget}（由 ${converted} 生成）`)
+      if (size === sourceSize) {
+        // 源尺寸：字节级复制，内容相同则不动（保持幂等）。
+        if (fs.existsSync(target) && sameFile(iconSource, target)) {
+          record(`icon-${String(size)}`, 'unchanged', target)
+        } else {
+          fs.mkdirSync(path.dirname(target), { recursive: true })
+          fs.copyFileSync(iconSource, target)
+          record(`icon-${String(size)}`, 'created', `${target}（源图直接复制）`)
+        }
+      } else if (fs.existsSync(target) && mtimeMs(target) >= mtimeMs(iconSource)) {
+        record(`icon-${String(size)}`, 'unchanged', target)
       } else {
-        record('icon-png', 'skipped', '未找到 SVG→PNG 转换器（ImageMagick / rsvg-convert / Inkscape），仅安装矢量图标')
+        const converted = resizePng(iconSource, target, size)
+        if (converted) record(`icon-${String(size)}`, 'created', `${target}（由 ${converted} 缩放）`)
+        else record(`icon-${String(size)}`, 'skipped', `未找到位图缩放工具（ImageMagick / ffmpeg），跳过 ${String(size)}x${String(size)} 档`)
       }
-    } else {
-      record('icon-png', 'unchanged', pngTarget)
-    }
 
-    if (fs.existsSync(pngTarget)) {
-      if (!fs.existsSync(aliasPng) || !sameFile(pngTarget, aliasPng)) {
-        fs.copyFileSync(pngTarget, aliasPng)
-        record('icon-png-alias', 'created', aliasPng)
-      } else {
-        record('icon-png-alias', 'unchanged', aliasPng)
+      if (fs.existsSync(target)) {
+        installedSizes += 1
+        // app_id 别名图标：合成器找不到它就会退回黄色通用 Wayland 占位图标。
+        if (fs.existsSync(aliasTarget) && sameFile(target, aliasTarget)) {
+          record(`icon-${String(size)}-alias`, 'unchanged', aliasTarget)
+        } else {
+          fs.mkdirSync(path.dirname(aliasTarget), { recursive: true })
+          fs.copyFileSync(target, aliasTarget)
+          record(`icon-${String(size)}-alias`, 'created', aliasTarget)
+        }
+      }
+    }
+    if (installedSizes === 0) record('icon', 'failed', '没有任何尺寸档位安装成功')
+
+    // 迁移：0.1.x 在 scalable/apps 下装过矢量图标。图标主题会优先命中矢量图，
+    // 留着它就会让新图标永远不生效，所以升级时主动清掉（连同 app_id 别名）。
+    const legacyDir = path.join(paths.iconThemeDir, 'scalable', 'apps')
+    for (const [id, file] of [
+      ['icon-svg-legacy', path.join(legacyDir, `${ICON_NAME}.svg`)],
+      ['icon-svg-legacy-alias', path.join(legacyDir, `${aliasIconName(appId)}.svg`)],
+    ]) {
+      if (!fs.existsSync(file)) continue
+      try {
+        fs.rmSync(file)
+        record(id, 'removed', file)
+      } catch (error) {
+        record(id, 'failed', `${file}：${error.message}`)
       }
     }
   } catch (error) {
@@ -348,11 +400,15 @@ export function install(options = {}) {
 
   // ---- 桌面入口 ---------------------------------------------------------
   if (launcherWritten) {
+    // 显式配置的 terminalCommand 由用户负责（原样写入）；
+    // 自动探测的则必须内嵌 dsh 绝对路径 —— 见 detectTerminalCommand 的注释。
     const terminalCommand = config.terminalAction
-      ? config.terminalCommand || detectTerminalCommand(env)
+      ? config.terminalCommand || detectTerminalCommand(env, dshBin)
       : ''
     if (config.terminalAction && !terminalCommand) {
       warnings.push('未找到可用终端，桌面入口的「以终端界面运行」动作已省略。')
+    } else if (config.terminalAction && !config.terminalCommand && !dshBin) {
+      warnings.push('未能解析 dsh 的绝对路径，右键动作里的 dsh 依赖桌面会话的 PATH，可能无法启动。')
     }
 
     const entryContent = renderDesktopEntry({
@@ -403,9 +459,9 @@ export function install(options = {}) {
   if (!options.quiet) {
     runRefresh('update-desktop-database', [paths.applicationsDir], warnings)
     if (desktop.id === 'kde') runRefresh('kbuildsycoca6', ['--noincremental'], warnings)
-    const themeIndex = path.join(path.dirname(paths.iconScalableDir), '..', 'index.theme')
+    const themeIndex = path.join(paths.iconThemeDir, 'index.theme')
     if (fs.existsSync(themeIndex)) {
-      runRefresh('gtk-update-icon-cache', ['-f', '-t', path.dirname(themeIndex)], warnings)
+      runRefresh('gtk-update-icon-cache', ['-f', '-t', paths.iconThemeDir], warnings)
     }
   }
   record('cache', 'ok', '已刷新桌面数据库 / KDE 菜单缓存')
@@ -453,9 +509,16 @@ export function uninstall(options = {}) {
     ['launcher', paths.launcherFile],
     ['cli-shim', paths.cliShimFile],
     ['desktop-entry', paths.desktopEntryFile],
-    ['icon-svg', paths.iconScalableFile],
-    ['icon-png', paths.iconBitmapFile],
   ]
+
+  // 图标按尺寸档位逐个安装，所以逐个删除。
+  for (const size of ICON_SIZES) {
+    targets.push([`icon-${String(size)}`, iconFileFor(paths.iconThemeDir, size)])
+  }
+  // 0.1.x 装的是 scalable/apps 下的矢量图标。升级不会让旧文件自己消失，留着
+  // 会让图标主题继续命中旧图，所以卸载时一并清理。
+  const legacyIconDir = path.join(paths.iconThemeDir, 'scalable', 'apps')
+  targets.push(['icon-svg-legacy', path.join(legacyIconDir, `${ICON_NAME}.svg`)])
 
   // 别名文件的文件名取决于 app_id，需要从主入口里读回来。
   try {
@@ -464,8 +527,10 @@ export function uninstall(options = {}) {
     if (match) {
       const appId = match[1].trim()
       targets.push(['desktop-entry-alias', path.join(paths.applicationsDir, `${appId}.desktop`)])
-      targets.push(['icon-svg-alias', path.join(paths.iconScalableDir, `${appId}.svg`)])
-      targets.push(['icon-png-alias', path.join(paths.iconBitmapDir, `${appId}.png`)])
+      for (const size of ICON_SIZES) {
+        targets.push([`icon-${String(size)}-alias`, path.join(iconDirFor(paths.iconThemeDir, size), `${appId}.png`)])
+      }
+      targets.push(['icon-svg-legacy-alias', path.join(legacyIconDir, `${appId}.svg`)])
     }
   } catch {
     // 主入口不存在也没关系，说明本来就没装全。
@@ -556,11 +621,14 @@ export function status(options = {}) {
   check('launcher', exists(paths.launcherFile), paths.launcherFile)
   check('cli-shim', exists(paths.cliShimFile), paths.cliShimFile)
   check('desktop-entry', exists(paths.desktopEntryFile), paths.desktopEntryFile)
-  check('icon', exists(paths.iconScalableFile), paths.iconScalableFile)
+  const iconFiles = ICON_SIZES.map((size) => iconFileFor(paths.iconThemeDir, size))
+  check('icon', iconFiles.some(exists), iconFiles.filter(exists).join(' / ') || iconFiles[0])
 
   const aliasDesktop = appIdFromEntry ? path.join(paths.applicationsDir, `${appIdFromEntry}.desktop`) : null
   check('desktop-entry-alias', aliasDesktop ? exists(aliasDesktop) : false, aliasDesktop ?? '无法从主入口读出 app_id')
-  const aliasIcon = appIdFromEntry ? path.join(paths.iconScalableDir, `${appIdFromEntry}.svg`) : null
+  const aliasIcon = appIdFromEntry
+    ? path.join(iconDirFor(paths.iconThemeDir, Math.max(...ICON_SIZES)), `${appIdFromEntry}.png`)
+    : null
   check('icon-alias', aliasIcon ? exists(aliasIcon) : false, aliasIcon ?? '无法从主入口读出 app_id')
   check('app-id-match', appIdFromEntry === expectedAppId, `入口内 ${appIdFromEntry ?? '（无）'} / 期望 ${expectedAppId}`, 'warning')
 

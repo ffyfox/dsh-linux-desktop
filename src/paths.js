@@ -17,6 +17,38 @@ export const APP_DIRNAME = 'dsh-desktop'
 /** 图标主题里注册的图标名（不含扩展名）。 */
 export const ICON_NAME = 'deepseek-harness'
 
+/**
+ * 安装到 hicolor 主题的位图尺寸档位。
+ *
+ * 图标源是位图而不是矢量，所以没有「一个文件任意缩放」这回事 —— 主题按
+ * **目录名**索引尺寸，只装一档的话，比它大的槽位只能拉伸放大。多装几档是
+ * 图标主题的常规做法。512 那一档直接复制源文件，不需要任何外部转换器，
+ * 因此无论系统上有没有 ImageMagick，`Icon=deepseek-harness` 都能解析到。
+ */
+export const ICON_SIZES = [128, 256, 512]
+
+/**
+ * 某个尺寸档位对应的 apps 目录。
+ *
+ * @param {string} iconThemeDir hicolor 主题根目录。
+ * @param {number} size 边长（像素）。
+ * @returns {string}
+ */
+export function iconDirFor(iconThemeDir, size) {
+  return path.join(iconThemeDir, `${size}x${size}`, 'apps')
+}
+
+/**
+ * 某个尺寸档位下的图标文件路径。
+ *
+ * @param {string} iconThemeDir hicolor 主题根目录。
+ * @param {number} size 边长（像素）。
+ * @returns {string}
+ */
+export function iconFileFor(iconThemeDir, size) {
+  return path.join(iconDirFor(iconThemeDir, size), `${ICON_NAME}.png`)
+}
+
 /** 桌面入口的 basename（不含 .desktop）。 */
 export const DESKTOP_ENTRY_ID = 'dsh'
 
@@ -41,8 +73,7 @@ export const CLI_SHIM_FILENAME = 'dsh-desktop'
  *   configHome: string, dataHome: string, runtimeHome: string,
  *   binDir: string, configDir: string, configFile: string,
  *   applicationsDir: string, desktopEntryFile: string,
- *   iconScalableDir: string, iconScalableFile: string,
- *   iconBitmapDir: string, iconBitmapFile: string,
+ *   iconThemeDir: string, iconSizes: number[],
  *   launcherFile: string,
  *   chromeProfileDir: string,
  *   runtimeDir: string, runtimeEnvFile: string, runtimeJsonFile: string,
@@ -73,8 +104,7 @@ export function resolvePaths(env = process.env) {
 
   const configDir = path.join(xdgConfigHome, APP_DIRNAME)
   const applicationsDir = path.join(xdgDataHome, 'applications')
-  const iconScalableDir = path.join(xdgDataHome, 'icons', 'hicolor', 'scalable', 'apps')
-  const iconBitmapDir = path.join(xdgDataHome, 'icons', 'hicolor', '128x128', 'apps')
+  const iconThemeDir = path.join(xdgDataHome, 'icons', 'hicolor')
 
   const runtimeDir = path.join(xdgRuntimeHome, APP_DIRNAME)
 
@@ -93,10 +123,8 @@ export function resolvePaths(env = process.env) {
     applicationsDir,
     desktopEntryFile: path.join(applicationsDir, `${DESKTOP_ENTRY_ID}.desktop`),
 
-    iconScalableDir,
-    iconScalableFile: path.join(iconScalableDir, `${ICON_NAME}.svg`),
-    iconBitmapDir,
-    iconBitmapFile: path.join(iconBitmapDir, `${ICON_NAME}.png`),
+    iconThemeDir,
+    iconSizes: ICON_SIZES,
 
     launcherFile: path.join(effectiveHome, '.local', 'bin', LAUNCHER_FILENAME),
     cliShimFile: path.join(effectiveHome, '.local', 'bin', CLI_SHIM_FILENAME),
