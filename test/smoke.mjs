@@ -587,9 +587,35 @@ await test('install 生成全部资产', () => {
   }
   assert.ok(fs.existsSync(installPaths.launcherFile))
   assert.ok(fs.existsSync(installPaths.desktopEntryFile))
+
+  // 源尺寸那一档是**字节级复制**，不需要任何外部工具，因此任何环境都必须存在 ——
+  // 这正是「即使没有 ImageMagick，Icon=deepseek-harness 也一定能解析到」的设计要点。
+  const sourceSize = Math.max(...ICON_SIZES)
+  assert.ok(
+    fs.existsSync(iconFileFor(installPaths.iconThemeDir, sourceSize)),
+    `源尺寸 ${sourceSize}x${sourceSize} 图标必须无条件存在（纯复制，不依赖转换器）`,
+  )
+
+  // 更小的档位依赖外部缩放工具。CI runner 上 ImageMagick / ffmpeg 一个都没有，
+  // 所以这里**不能**无条件要求它们存在 —— 要么装上了，要么被记成 skipped，
+  // 但绝不能是 failed（那意味着「本可以降级却报了错」）。
   for (const size of ICON_SIZES) {
-    assert.ok(fs.existsSync(iconFileFor(installPaths.iconThemeDir, size)), `应安装 ${size}x${size} 图标`)
+    if (size === sourceSize) continue
+    if (fs.existsSync(iconFileFor(installPaths.iconThemeDir, size))) continue
+    const step = result.steps.find((s) => s.id === `icon-${String(size)}`)
+    assert.equal(
+      step?.status,
+      'skipped',
+      `没有转换器时 ${size}x${size} 应记为 skipped，实际为 ${step?.status ?? '（缺少该步骤）'}`,
+    )
   }
+  const failed = result.steps.filter((s) => s.status === 'failed')
+  assert.deepEqual(
+    failed.map((s) => `${s.id}: ${s.detail}`),
+    [],
+    '没有转换器时安装应当降级而不是失败',
+  )
+
   assert.ok(fs.existsSync(installPaths.configFile), '安装后必须存在可编辑的配置文件')
   assert.equal(fs.statSync(installPaths.launcherFile).mode & 0o777, 0o755, '启动脚本必须可执行')
   // 断言命中的是假工具链，而不是宿主机的浏览器/dsh。
