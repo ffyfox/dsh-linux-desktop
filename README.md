@@ -251,7 +251,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 在仓库根目录执行：
 
 ```bash
-node test/smoke.mjs                                   # 冒烟测试，72 项，零依赖
+node test/smoke.mjs                                   # 冒烟测试，116 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
 node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录
