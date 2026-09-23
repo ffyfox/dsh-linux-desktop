@@ -68,8 +68,13 @@ const IS_LINUX = process.platform === 'linux'
  * @param {() => void | Promise<void>} fn
  */
 async function test(label, fn) {
+  const skippedBefore = skipped
   try {
     await fn()
+    // 回调内部可能自己调了 skipTest（宿主机缺少可选依赖时）。那种情况已经记过
+    // 一次「跳过」，这里不能再记一次「通过」—— 同一条用例同时进两个计数，用例
+    // 总数就会随宿主机环境漂移，而 README 与发布前校验都锚在那个数上。
+    if (skipped > skippedBefore) return
     passed += 1
     process.stdout.write(`  \u001B[32m✓\u001B[0m ${label}\n`)
   } catch (error) {
@@ -1138,11 +1143,27 @@ await test('settingsBase 只挑进命名空间的字段', () => {
 })
 
 await test('schema 用真的 schemastery 构造时默认值与校验都对', async () => {
-  const dir = path.join(os.homedir(), '.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery')
+  // 这个套件按约定「零依赖」运行：CI 只 checkout、不 npm install，宿主机上也
+  // 未必把 dsh 装在同一个位置。所以按「本仓库 node_modules → 常见的几个全局
+  // 安装位置」依次找，全都找不到才跳过。
+  //
+  // 原先只认 `~/.npm-global/...` 一处 —— 那是作者本机的路径，对任何别人都必然
+  // 落空，这条用例等于形同不存在。
   let z
-  try {
-    z = (await import(path.join(dir, 'lib/index.mjs'))).default
-  } catch {
+  for (const candidate of [
+    '@deepseek-ai/schemastery',
+    path.join(os.homedir(), '.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery/lib/index.mjs'),
+    '/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery/lib/index.mjs',
+    '/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery/lib/index.mjs',
+  ]) {
+    try {
+      z = (await import(candidate)).default
+      break
+    } catch {
+      // 换下一个候选位置
+    }
+  }
+  if (!z) {
     return skipTest('schema 用真的 schemastery 构造时默认值与校验都对', '宿主机上没有 @deepseek-ai/schemastery')
   }
   const schema = createSettingsSchema(z)
@@ -2007,8 +2028,13 @@ if (IS_LINUX) {
 
 process.stdout.write(`\n${'─'.repeat(60)}\n`)
 if (failed === 0) {
-  const skipNote = skipped > 0 ? `\u001B[2m（跳过 ${skipped} 项：非 Linux）\u001B[0m` : ''
-  process.stdout.write(`\u001B[32m全部通过\u001B[0m：${passed} 项${skipNote}\n`)
+  // 报「用例共 N 项」而不是只报通过数：通过数会随宿主机有没有位图缩放工具、
+  // 有没有全局 dsh 而变化（CI 上就比本机少），用例总数才是跨环境稳定的那个数。
+  const totalNote =
+    skipped > 0
+      ? `\u001B[2m（跳过 ${skipped} 项，用例共 ${passed + skipped} 项）\u001B[0m`
+      : `\u001B[2m（用例共 ${passed} 项）\u001B[0m`
+  process.stdout.write(`\u001B[32m全部通过\u001B[0m：${passed} 项${totalNote}\n`)
 } else {
   process.stdout.write(`\u001B[31m失败 ${failed} 项\u001B[0m，通过 ${passed} 项${skipped > 0 ? `，跳过 ${skipped} 项` : ''}\n\n`)
   for (const { label, error } of failures) {

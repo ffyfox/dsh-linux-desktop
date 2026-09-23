@@ -262,7 +262,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 Run these from the repository root:
 
 ```bash
-node test/smoke.mjs                                   # smoke tests, 116 checks, zero dependencies
+node test/smoke.mjs                                   # smoke tests, 117 checks total, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
 node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touches nothing real

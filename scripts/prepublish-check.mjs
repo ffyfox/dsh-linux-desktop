@@ -85,9 +85,13 @@ else fail(`cordis.patch.yml 里没有找到 "name: ${pkg.name}"`, '补丁行必�
 // 因为「全部通过」和「：」之间夹着 \u001B[0m。先剥掉颜色码再匹配。
 const stripAnsi = (text) => text.replace(/\u001B\[[0-9;]*m/g, '')
 
-// 真实用例数量。第 7 节拿它去核对两个 README —— 那个数字没有任何机制
-// 强制同步，每加一条测试就会悄悄过期（本项目就曾在 README 上挂着「72 项」
-// 而实际是 116）。
+// 真实用例总数。第 7 节拿它去核对两个 README —— 那个数字没有任何机制强制
+// 同步，每加一条用例就会悄悄过期（本项目就曾在 README 上挂着「72 项」而实际
+// 早已是三位数）。
+//
+// 取「用例共 N 项」而**不是**通过数：通过数会随宿主机有没有位图缩放工具、
+// 有没有全局 dsh 而变化。本脚本第一次跑 CI 就栽在这上面 —— 本机 116、runner
+// 上 115，于是发布前校验在 CI 上红了。用例总数才是跨环境稳定的那个数。
 let measuredTestCount = null
 
 try {
@@ -96,9 +100,9 @@ try {
     encoding: 'utf8',
     stdio: 'pipe',
   })
-  const summary = /全部通过[：:]\s*(\d+)/.exec(stripAnsi(output))?.[1]
+  const summary = /用例共\s*(\d+)\s*项/.exec(stripAnsi(output))?.[1]
   if (summary) measuredTestCount = Number(summary)
-  ok(`冒烟测试通过${summary ? `（${summary} 项）` : ''}`)
+  ok(`冒烟测试通过${summary ? `（用例共 ${summary} 项）` : ''}`)
 } catch (error) {
   const output = stripAnsi(`${error.stdout ?? ''}${error.stderr ?? ''}`)
   const tail = output.split('\n').filter((line) => line.includes('✗')).slice(0, 8).join('\n      ')
@@ -173,10 +177,12 @@ for (const file of ['README.md', 'README.en.md']) {
   // README 里声明的用例数量必须与实际一致。这个数字是纯手工维护的，
   // 加测试时最容易忘 —— 而它出现在公开仓库首页的开发小节里。
   // 非 Linux 平台会跳过依赖 Linux 的用例，数量天然更少，所以只在 Linux 上核对。
+  // 只要求「冒烟测试」之后同一行里出现「数字 + 单位」，允许中间的措辞变化
+  // （上一版把「用例共」写成硬编码，改个词就匹配不上了）。
   const claimedCount =
     file === 'README.md'
-      ? /冒烟测试[，,]\s*(\d+)\s*项/.exec(text)?.[1]
-      : /smoke tests?,\s*(\d+)\s*checks?/i.exec(text)?.[1]
+      ? /冒烟测试[^\d\n]{0,12}(\d+)\s*项/.exec(text)?.[1]
+      : /smoke tests?[^\d\n]{0,12}(\d+)\s*checks?/i.exec(text)?.[1]
 
   if (process.platform !== 'linux') {
     notes.push(`${file} 的用例数量未核对（当前平台 ${process.platform} 会跳过依赖 Linux 的用例）`)
@@ -190,7 +196,7 @@ for (const file of ['README.md', 'README.en.md']) {
   } else if (Number(claimedCount) !== measuredTestCount) {
     fail(
       `${file} 写的用例数量是 ${claimedCount}，实际是 ${measuredTestCount}`,
-      '加了测试就同步改这里，否则公开仓库的首页会挂着一个错误数字',
+      '加了用例就同步改这里 —— 要写用例总数，不是通过数',
     )
   } else {
     ok(`${file} 的用例数量与实际一致（${claimedCount} 项）`)
