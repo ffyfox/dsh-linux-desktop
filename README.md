@@ -4,7 +4,7 @@
 
 这是一个 DSH bundle。它复用系统已有的 Chromium 系浏览器，用标准 XDG 桌面入口把 `dsh web` 接入桌面环境，并且不修改 `dsh web` 自身的行为。
 
-**分发状态**：尚未发布到 npm。当前安装方式见下文。
+**分发状态**：可直接从 GitHub 安装，尚未发布到 npm。
 
 ---
 
@@ -31,17 +31,27 @@ Firefox 不受支持：Firefox 已移除 SSB（Site Specific Browser），无法
 
 ## 安装
 
-目前可用的安装方式只有本地检出：
+```bash
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop
+```
+
+安装后重启一次 `dsh web`。
+
+想锁定版本就在后面加 `#<tag>`：
+
+```bash
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.1
+```
+
+改代码时改用本地检出：
 
 ```bash
 dsh plugin --profile web add /path/to/dsh-linux-desktop
 ```
 
-安装后重启一次 `dsh web`。
-
-> **为什么只有这一种方式**：尚未发布到 npm，因此 `add dsh-linux-desktop`（按包名）暂不可用。
+> **`github:` 这条实测过**：在隔离的 `DSH_HOME` 里跑通，装完 `dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`，不需要手工编辑 `package.json`。
 >
-> 本地检出方式在隔离的 `DSH_HOME` 中实测通过。本插件是纯 ESM JavaScript，没有构建步骤，所以从任何来源安装都不需要给 pnpm 授予 `allowBuilds` 权限。
+> 尚未发布到 npm，因此 `add dsh-linux-desktop`（按包名）暂不可用。本插件是纯 ESM JavaScript，没有构建步骤，所以从任何来源安装都不需要给 pnpm 授予 `allowBuilds` 权限。
 
 ## 使用
 

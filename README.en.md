@@ -4,7 +4,7 @@
 
 This is a DSH bundle. It reuses the Chromium-family browser already installed on your system, wires `dsh web` into the desktop through standard XDG desktop entries, and does not change the behaviour of `dsh web` itself.
 
-**Distribution status**: not yet published to npm. See below for how to install.
+**Distribution status**: installable straight from GitHub; not yet published to npm.
 
 ---
 
@@ -31,17 +31,27 @@ Firefox is not supported: Mozilla removed SSB (Site Specific Browser), so Firefo
 
 ## Install
 
-The only available installation method is currently a local checkout:
+```bash
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop
+```
+
+Restart `dsh web` once after installing.
+
+To pin a version, append `#<tag>`:
+
+```bash
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.1
+```
+
+For working on the code, use a local checkout instead:
 
 ```bash
 dsh plugin --profile web add /path/to/dsh-linux-desktop
 ```
 
-Restart `dsh web` once after installing.
-
-> **Why this is the only method**: the package is not published to npm yet, so `add dsh-linux-desktop` (by package name) is not available.
+> **The `github:` form was verified**: it was run in an isolated `DSH_HOME`, and `dsh` registers the row in the profile's `dsh.profile.bundles` automatically — no manual `package.json` edit needed.
 >
-> The local-checkout method was verified in an isolated `DSH_HOME`. This plugin is plain ESM JavaScript with no build step, so installing it from any source does not require granting pnpm an `allowBuilds` permission.
+> The package is not published to npm yet, so `add dsh-linux-desktop` (by package name) is not available. This plugin is plain ESM JavaScript with no build step, so installing it from any source does not require granting pnpm an `allowBuilds` permission.
 
 ## Usage
 
