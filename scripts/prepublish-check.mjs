@@ -250,14 +250,27 @@ try {
 // GitHub 仓库会暴露**全部被跟踪文件**（npm 只发 files 白名单，是它的子集），
 // 两者都不可逆。
 //
-// 指纹**全部在运行时从环境推导，绝不写进仓库**：否则这道闸门自己就成了泄露源。
-// 副作用是换一台机器开发时，它会自动改盯那台机器的身份。
+// 分两层，因为它们的适用范围不同：
+//
+//   A. 环境身份指纹（家目录 / 用户名 / 主机名）—— **只在开发机上生效**。
+//      指纹全部在运行时从环境推导，绝不写进仓库：否则这道闸门自己就成了泄露源。
+//      CI 上必须跳过：那里的身份是临时的 `runner`，而仓库里本来就有 "runner"
+//      这个英文词 —— 第一次跑 CI 就栽在这上面（7 处误报）。临时跑者的身份泄漏
+//      不了任何东西，真正要盯的是开发者本人的机器。
+//
+//   B. 通用模式（绝对家目录路径 / 密钥 / 邮箱 …）—— **任何环境都生效**。
+//      其中「绝对家目录路径」是 A 的兜底：它不依赖运行环境，所以即使在 CI 上，
+//      `/home/<某人>/…` 这种真实路径照样会被拦下来。
+const IN_CI = Boolean(process.env.CI) || Boolean(process.env.GITHUB_ACTIONS)
+
 const PRIVACY_FINGERPRINTS = (() => {
+  if (IN_CI) return []
+
   const collected = []
   const seen = new Set()
   const add = (label, value) => {
     const text = String(value ?? '').trim()
-    // 短值做子串匹配会满屏误报，所以 4 个字符以下直接不盯（并记一笔说明）。
+    // 短值做子串匹配会满屏误报，所以 4 个字符以下直接不盯。
     if (text.length < 4 || seen.has(text)) return
     seen.add(text)
     collected.push({ label, text })
@@ -287,6 +300,13 @@ const PRIVACY_PATTERNS = [
   // README 里的 `?token=...` 是占位符，够不到这里的长度门槛。
   { label: '疑似真实 launch token', re: /token=[A-Za-z0-9._-]{20,}/ },
   { label: '手机号', re: /(?<![0-9A-Za-z])1[3-9]\d{9}(?![0-9A-Za-z])/ },
+  {
+    label: '本机绝对家目录路径',
+    // 只认像真实账号名的段（≥3 个 ASCII 字符），所以文档里的占位符
+    // `/home/<user>/…` 与示例 `/home/张三/…` 都不会误报。这条不依赖运行环境，
+    // 因此在 CI 上也照常生效 —— 它是上面那组身份指纹的兜底。
+    re: /(?:^|[^A-Za-z0-9])\/(?:home|Users)\/[A-Za-z0-9._-]{3,}\//,
+  },
   {
     label: '邮箱地址',
     re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
@@ -348,7 +368,11 @@ try {
 
   if (hits.length === 0) {
     const watched = PRIVACY_FINGERPRINTS.map((item) => item.label).join('、')
-    ok(`隐私指纹干净（扫了 ${scanned} 个被跟踪文件；盯着 ${watched} 与密钥/邮箱模式）`)
+    const scope = watched ? `${watched}、` : ''
+    ok(`隐私指纹干净（扫了 ${scanned} 个被跟踪文件；盯着 ${scope}绝对家目录路径与密钥/邮箱模式）`)
+    if (IN_CI) {
+      notes.push('身份指纹（家目录 / 用户名 / 主机名）在 CI 上跳过 —— 那里是临时跑者；发布前的本地校验会盯它们')
+    }
   } else {
     const shown = hits
       .slice(0, 8)
