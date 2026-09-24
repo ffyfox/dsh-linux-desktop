@@ -30,6 +30,8 @@
     "test": "node test/smoke.mjs",
     "check": "node scripts/prepublish-check.mjs",
     "prepublishOnly": "node scripts/prepublish-check.mjs",
+    "pack:tag": "node scripts/pack-from-tag.mjs",
+    "snapshot": "node scripts/snapshot.mjs",
     "status": "node bin/dsh-desktop.js status"
   },
   "dsh": {

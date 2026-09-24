@@ -304,7 +304,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 在仓库根目录执行：
 
 ```bash
-node test/smoke.mjs                                   # 冒烟测试，用例共 135 项，零依赖
+node test/smoke.mjs                                   # 冒烟测试，用例共 152 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
 node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录
@@ -313,6 +313,27 @@ node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰
 以上前三条是 CI 在每次 push 与 PR 时执行的命令，也是合并前必须通过的门。CI 覆盖 Node 20、22、24，并在 macOS 上额外验证「非 Linux 平台安静地不执行任何操作」。
 
 `--root <目录>` 或环境变量 `DSH_DESKTOP_ROOT` 会把全部读写重定向到沙箱，包括 `HOME` 与所有 `XDG_*` 路径。端口不在沙箱范围内，测试时注意不要影响正在使用的服务。
+
+### 发布
+
+制品只从 tag 产出，不再从工作区产出：
+
+```bash
+npm run check                        # 发布前校验（含「会进包的文件都已提交」）
+git tag v0.5.0                       # tag 打在该发布的那个提交上
+npm run pack:tag                     # 从 tag 导出、在临时目录里打包，并逐文件核对
+npm publish <上一步打印的 tgz 路径>   # 发的是这个 tgz，不是工作区
+```
+
+`npm run pack:tag` 会拒绝三种状态：会进包的文件有未提交改动、`HEAD` 没有被 `v<版本>` 精确指着、该 tag 不存在。它把 tag 的树导出到临时目录，**在临时目录里**执行 `npm pack`，再把 tgz 里每个文件的字节与导出树逐个比对 —— 这样「GitHub 上的 v0.4.1」与「npm 上的 0.4.1」不可能再不一样（那次的成因正是 `npm publish` 打包了带未提交改动的工作区，而 tag 又打错了位置）。
+
+要看日常那套跑的到底是哪个版本，用快照把它指向刚打出的 tgz：
+
+```bash
+npm run snapshot -- --profile web    # 打包，并把该 profile 的插件依赖改成 file:<tgz>
+```
+
+`--profile` 必填、没有默认值：这条命令会改真实 profile 的 `package.json`，指错 profile 的代价太大。`dsh plugin install` 失败时会把 `package.json` 回滚成改动前的内容。
 
 ## 架构决策
 

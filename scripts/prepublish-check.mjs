@@ -24,6 +24,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { shippedPaths } from './shipped-paths.mjs'
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const problems = []
@@ -212,19 +214,11 @@ for (const file of ['README.md', 'README.en.md']) {
 // 0.4.1 里 src/client.js 比 tag 多了一处未提交的本地改动，事后逐文件比对才发现。
 //
 // 只盯会进包的那些路径。未跟踪文件也算 —— 它们同样会被 `files` 白名单收进去。
-const SHIPPED_PATHS = [
-  'src',
-  'bin',
-  'cordis.patch.yml',
-  'package.json',
-  'README.md',
-  'README.en.md',
-  'CHANGELOG.md',
-  'LICENSE',
-]
-
+//
+// 路径清单从 package.json 的 `files` 推导（见 scripts/shipped-paths.mjs），
+// 与 pack-from-tag.mjs 的状态校验共用同一份定义，免得两处漂移。
 try {
-  const dirty = execFileSync('git', ['status', '--porcelain', '--', ...SHIPPED_PATHS], {
+  const dirty = execFileSync('git', ['status', '--porcelain', '--', ...shippedPaths(ROOT)], {
     cwd: ROOT,
     encoding: 'utf8',
     stdio: 'pipe',
@@ -310,7 +304,12 @@ const PRIVACY_PATTERNS = [
   {
     label: '邮箱地址',
     re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
-    allow: /@users\.noreply\.github\.com$/i,
+    // 两类放行，都不是「真实邮箱」：
+    //   - GitHub 的 noreply 地址（提交者身份，刻意公开）
+    //   - RFC 2606 保留域 example.com/net/org —— 它们**按标准**不可能属于任何人，
+    //     正是给文档和测试用的。不放行的话，测试里的假身份会逼着人写一个看着像
+    //     真人的地址，那是往反方向推。
+    allow: /@(?:users\.noreply\.github\.com|example\.(?:com|net|org))$/i,
   },
 ]
 

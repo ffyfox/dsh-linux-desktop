@@ -47,6 +47,10 @@ import { ICON_SIZES, iconDirFor, iconFileFor, resolvePaths } from '../src/paths.
 import { clearRuntime, inspectRuntime, isProcessAlive, readRuntime, writeRuntime } from '../src/runtime.js'
 import { createSettingsSchema, SETTINGS_FIELDS, SETTINGS_NAMESPACE, settingsBase } from '../src/settings.js'
 import { findListeningPid, isDshWebProcess, resolveServerTarget, stopServerProcess } from '../src/server.js'
+// 发布脚本里的纯函数。这几个文件都只在被直接执行时才跑 CLI，import 进来没有副作用。
+import { packFromTag, tagForVersion, verifyReleaseState } from '../scripts/pack-from-tag.mjs'
+import { shippedPaths } from '../scripts/shipped-paths.mjs'
+import { findPackageDependency } from '../scripts/snapshot.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
@@ -1863,6 +1867,256 @@ await test('插件入口导出了 Cordis 契约所需的 name / inject / apply',
   assert.equal(mod.name, 'linux-desktop')
   assert.deepEqual(mod.inject, ['connection', 'webServer'])
   assert.equal(typeof mod.apply, 'function')
+})
+
+// ---------------------------------------------------------------------------
+section('发布制品必须来自 tag（pack-from-tag / snapshot）')
+// ---------------------------------------------------------------------------
+
+// 由来：2026-09-25 的 0.4.1 事故 —— `npm publish` 打包的是工作区而不是某个提交，
+// 一处未提交的改动被一起发到了 npm，GitHub 与 npm 上的 0.4.1 内容不同，而 tag 还
+// 打在一个跟该修复无关的提交上。这组用例盯的是那条结构性保证：制品只能从 tag 产出。
+//
+// 前半段是纯函数（不碰 git），后半段在一个临时仓库里真跑一遍打包。
+
+const SNAPSHOT_PACKAGE = 'dsh-linux-desktop'
+
+await test('会进包的路径清单从 package.json 的 files 推导（两处闸门共用一份）', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+  const paths = shippedPaths(ROOT)
+
+  // 从 files 推导而不是各自抄一份：往 files 里加路径时，脏树闸门自动覆盖到。
+  for (const entry of manifest.files) {
+    assert.ok(paths.includes(entry), `files 里的 ${entry} 没有被闸门覆盖`)
+  }
+  // npm 无论 files 怎么写都一定会打包 package.json，所以它必须始终在清单里。
+  assert.ok(paths.includes('package.json'), 'package.json 必须在清单里')
+  // 去重：重复的路径会让 git status 的输出里出现重复行，看着像多个问题。
+  assert.equal(paths.length, new Set(paths).size, '清单里不应有重复项')
+})
+
+/** 在临时仓库里跑 git。用 execFileSync 而不是拼 shell，省得为引号转义分心。 */
+function gitIn(cwd, args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' })
+}
+
+/** 造一个最小可打包的 git 仓库：一个提交 + 一个 tag。 */
+function makeTaggedRepo(name, version = '1.2.3') {
+  const dir = makeSandbox(name)
+  fs.mkdirSync(path.join(dir, 'src'))
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    `${JSON.stringify({ name: SNAPSHOT_PACKAGE, version, files: ['src'] }, null, 2)}\n`,
+  )
+  fs.writeFileSync(path.join(dir, 'src/index.js'), 'export const answer = 42\n')
+  gitIn(dir, ['init', '-q', '.'])
+  gitIn(dir, ['add', '-A'])
+  // 不能假设宿主机配过 git 身份，更不能为了测试去改用户的全局配置 ——
+  // 只对这一次 commit 临时指定身份。邮箱用 `@users.noreply.github.com`：
+  // 发布前校验第 9 项会拦下所有其它邮箱（真实邮箱不许进仓库），而这一种是刻意公开的。
+  gitIn(dir, [
+    '-c',
+    'user.name=test',
+    '-c',
+    'user.email=test@users.noreply.github.com',
+    // 关掉签名：开发机若全局开了 commit.gpgsign，这次提交会因为拿不到 key 而失败，
+    // 而测试关心的只是「有一个提交和一个 tag」。
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '-q',
+    '-m',
+    'init',
+  ])
+  gitIn(dir, ['tag', `v${version}`])
+  return dir
+}
+
+await test('tagForVersion 给版本号加上 v 前缀', () => {
+  assert.equal(tagForVersion('1.2.3'), 'v1.2.3')
+  assert.equal(tagForVersion('0.5.0'), 'v0.5.0')
+})
+
+await test('verifyReleaseState：干净工作区 + tag 精确指向 HEAD → 无问题', () => {
+  assert.deepEqual(verifyReleaseState({ version: '1.2.3', porcelain: '', describedTag: 'v1.2.3' }), [])
+  // 前后空白不该被当成「脏」或「tag 不同」。
+  assert.deepEqual(verifyReleaseState({ version: '1.2.3', porcelain: '\n', describedTag: ' v1.2.3\n' }), [])
+})
+
+await test('verifyReleaseState：工作区脏时列出文件名并给出可操作提示', () => {
+  const problems = verifyReleaseState({
+    version: '1.2.3',
+    porcelain: ' M src/client.js\n?? src/untracked.js',
+    describedTag: 'v1.2.3',
+  })
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /未提交/)
+  assert.match(problems[0], /src\/client\.js/)
+  assert.match(problems[0], /tag/)
+})
+
+await test('verifyReleaseState：HEAD 被别的 tag 指着时报 tag 不匹配', () => {
+  const problems = verifyReleaseState({ version: '1.2.3', porcelain: '', describedTag: 'v1.2.2' })
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /v1\.2\.3/)
+  assert.match(problems[0], /v1\.2\.2/)
+})
+
+await test('verifyReleaseState：没有 tag 指向 HEAD 时报缺失', () => {
+  const problems = verifyReleaseState({ version: '1.2.3', porcelain: '', describedTag: null })
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /没有 tag/)
+  assert.match(problems[0], /v1\.2\.3/)
+})
+
+await test('verifyReleaseState：读不到版本号时只报这一条', () => {
+  const problems = verifyReleaseState({ version: '', porcelain: ' M src/client.js', describedTag: null })
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /version/)
+})
+
+await test('findPackageDependency：键等于包名即命中', () => {
+  assert.equal(
+    findPackageDependency(
+      { [SNAPSHOT_PACKAGE]: '^0.5.0', lodash: '^4.17.21' },
+      { packageName: SNAPSHOT_PACKAGE, repoRoot: '/repo' },
+    ),
+    SNAPSHOT_PACKAGE,
+  )
+})
+
+await test('findPackageDependency：值是指向本包 tgz 的 file: 时命中', () => {
+  assert.equal(
+    findPackageDependency(
+      { desktop: 'file:/tmp/snapshots/dsh-linux-desktop-1.2.3.tgz' },
+      { packageName: SNAPSHOT_PACKAGE, repoRoot: '/repo' },
+    ),
+    'desktop',
+  )
+})
+
+await test('findPackageDependency：link: 指向本仓库根目录时命中', () => {
+  // 绝对路径：基准无关，直接比。
+  assert.equal(
+    findPackageDependency(
+      { desktop: `link:/home/me/projects/${SNAPSHOT_PACKAGE}` },
+      { packageName: SNAPSHOT_PACKAGE, repoRoot: `/home/me/projects/${SNAPSHOT_PACKAGE}` },
+    ),
+    'desktop',
+  )
+  // 相对路径：基准是 profile 目录，必须由 profileDir 参与解析 ——
+  // 少传它就会把相对 link 全部漏掉。
+  assert.equal(
+    findPackageDependency(
+      { desktop: `link:../${SNAPSHOT_PACKAGE}` },
+      {
+        packageName: SNAPSHOT_PACKAGE,
+        repoRoot: `/home/me/projects/${SNAPSHOT_PACKAGE}`,
+        profileDir: '/home/me/projects/dsh-desktop-profile',
+      },
+    ),
+    'desktop',
+  )
+})
+
+await test('findPackageDependency：link: 指向别处不算命中', () => {
+  assert.equal(
+    findPackageDependency(
+      { desktop: 'link:/somewhere/else' },
+      { packageName: SNAPSHOT_PACKAGE, repoRoot: '/repo' },
+    ),
+    null,
+  )
+})
+
+await test('findPackageDependency：一个都没命中时返回 null', () => {
+  const options = { packageName: SNAPSHOT_PACKAGE, repoRoot: '/repo' }
+  assert.equal(findPackageDependency({ lodash: '^4.17.21', other: 'file:/tmp/other-1.0.0.tgz' }, options), null)
+  // dependencies 字段整个缺失时也不能炸。
+  assert.equal(findPackageDependency(undefined, options), null)
+})
+
+await test('findPackageDependency：命中多个时抛错并列出冲突项', () => {
+  assert.throws(
+    () =>
+      findPackageDependency(
+        { a: `file:${SNAPSHOT_PACKAGE}-1.0.0.tgz`, b: 'link:/repo' },
+        { packageName: SNAPSHOT_PACKAGE, repoRoot: '/repo' },
+      ),
+    /2 个依赖项/,
+  )
+})
+
+await test('packFromTag 端到端：从 tag 打包，逐文件核对并算出 sha1', () => {
+  const dir = makeTaggedRepo('pack-from-tag')
+  try {
+    const result = packFromTag({ root: dir, dest: path.join(dir, 'out') })
+
+    assert.ok(fs.existsSync(result.tgz), `tgz 应存在：${result.tgz}`)
+    assert.match(result.sha1, /^[0-9a-f]{40}$/, 'sha1 应是 40 位十六进制')
+    assert.equal(result.tag, 'v1.2.3')
+    // files 是包内相对路径：逐文件核对过才会出现在这里。
+    assert.ok(result.files.includes('package.json'), `包内应有 package.json，实际：${result.files.join(', ')}`)
+    assert.ok(result.files.includes('src/index.js'), `包内应有 src/index.js，实际：${result.files.join(', ')}`)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await test('packFromTag：工作区脏时抛错，绝不产出 tgz', () => {
+  const dir = makeTaggedRepo('pack-from-tag-dirty')
+  try {
+    // 改一个已跟踪文件：这正是 0.4.1 那次事故的形态。
+    fs.writeFileSync(path.join(dir, 'src/index.js'), 'export const answer = 43\n')
+
+    const dest = path.join(dir, 'out')
+    assert.throws(() => packFromTag({ root: dir, dest }), /未提交/)
+    assert.ok(
+      !fs.existsSync(path.join(dest, `${SNAPSHOT_PACKAGE}-1.2.3.tgz`)),
+      '校验不过时不该留下任何制品',
+    )
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await test('snapshot CLI：没给 --profile 时拒绝执行（免得误动别的 profile）', () => {
+  let status = 0
+  let stderr = ''
+  try {
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts/snapshot.mjs')], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (error) {
+    status = error.status
+    stderr = String(error.stderr ?? '')
+  }
+  assert.equal(status, 2, '缺 --profile 应以退出码 2 结束')
+  assert.match(stderr, /--profile/)
+})
+
+await test('snapshot CLI：profile 不存在时报错退出，不去猜别的路径', () => {
+  // DSH_HOME 指向沙箱，这样这条用例碰不到真实的 ~/.dsh。
+  const dshHome = makeSandbox('snapshot-nohome')
+  try {
+    let status = 0
+    let stderr = ''
+    try {
+      execFileSync(process.execPath, [path.join(ROOT, 'scripts/snapshot.mjs'), '--profile', 'web'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, DSH_HOME: dshHome },
+      })
+    } catch (error) {
+      status = error.status
+      stderr = String(error.stderr ?? '')
+    }
+    assert.equal(status, 1)
+    assert.match(stderr, /profiles\/web\/package\.json/)
+  } finally {
+    fs.rmSync(dshHome, { recursive: true, force: true })
+  }
 })
 
 // ---------------------------------------------------------------------------

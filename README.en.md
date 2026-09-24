@@ -305,7 +305,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 Run these from the repository root:
 
 ```bash
-node test/smoke.mjs                                   # smoke tests, 135 checks total, zero dependencies
+node test/smoke.mjs                                   # smoke tests, 152 checks total, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
 node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touches nothing real
@@ -314,6 +314,27 @@ node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touch
 The first three are the commands CI runs on every push and pull request, and they are the gate a change must pass before merging. CI covers Node 20, 22, and 24, and additionally verifies on macOS that the plugin does nothing at all on non-Linux platforms.
 
 `--root <dir>` or the `DSH_DESKTOP_ROOT` environment variable redirects all reads and writes into a sandbox, including `HOME` and every `XDG_*` path. Ports are not sandboxed, so take care not to disturb a service you are using.
+
+### Releasing
+
+Artifacts come from a tag, never from the working tree:
+
+```bash
+npm run check                        # pre-publish validation (including "shipped files are committed")
+git tag v0.5.0                       # tag the commit that should be released
+npm run pack:tag                     # export the tag, pack in a temp dir, verify file by file
+npm publish <the tgz path printed above>   # publish that tgz, not the working tree
+```
+
+`npm run pack:tag` refuses three states: uncommitted changes under the shipped paths, `HEAD` not exactly tagged `v<version>`, or that tag missing. It exports the tag's tree to a temp directory, runs `npm pack` **inside that temp directory**, then compares every file in the tgz byte for byte against the exported tree — so "v0.4.1 on GitHub" and "0.4.1 on npm" can never diverge again (that incident was caused by `npm publish` packing a working tree with uncommitted changes, on top of a tag pointing at the wrong commit).
+
+To check which version the everyday profile is actually running, point it at a freshly packed tgz:
+
+```bash
+npm run snapshot -- --profile web    # pack, then repoint that profile's dependency to file:<tgz>
+```
+
+`--profile` is required and has no default: the command edits a real profile's `package.json`, and pointing the wrong profile at a snapshot is too costly a mistake. If `dsh plugin install` fails, `package.json` is rolled back to its previous contents.
 
 ## Architecture decisions
 
