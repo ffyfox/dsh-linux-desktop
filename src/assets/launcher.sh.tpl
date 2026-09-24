@@ -25,13 +25,40 @@ BROWSER="@@BROWSER@@"
 BROWSER_LABEL="@@BROWSER_LABEL@@"
 PROFILE_MODE="@@PROFILE_MODE@@"
 PROFILE_DIR="@@PROFILE_DIR@@"
-RUNTIME_DIR="@@RUNTIME_DIR@@"
-RUNTIME_ENV="$RUNTIME_DIR/runtime.env"
-RUNTIME_JSON="$RUNTIME_DIR/runtime.json"
 LOG_FILE="@@LOG_FILE@@"
 DSH_BIN="@@DSH_BIN@@"
 EXTRA_PATH="@@EXTRA_PATH@@"
 VERSION="@@VERSION@@"
+
+# ---------------------------------------------------------------------------
+# 可以被环境变量覆盖的三项
+#
+# 桌面入口的「以开发配置运行」右键动作就是靠它们切到另一套 profile / 端口 /
+# 沙箱根目录的。默认值来自安装那一刻的 config.json。
+#
+# DSH_PROFILE 与上面的 PROFILE_MODE / PROFILE_DIR 无关 —— 那两个说的是**浏览器**
+# 配置目录，这个说的是 **dsh profile**。命名撞车是历史原因，别混。
+# ---------------------------------------------------------------------------
+
+DSH_PROFILE="${DSH_DESKTOP_PROFILE:-@@PROFILE@@}"
+PORT="${DSH_DESKTOP_PORT:-@@PORT@@}"
+
+RUNTIME_DIR="@@RUNTIME_DIR@@"
+
+# DSH_DESKTOP_ROOT 会把插件的 config / data / runtime / bin 全部重定向到沙箱里
+# （见 src/paths.js）。运行时目录和日志路径必须跟着改 —— 否则启动器会去真实目录
+# 找一个永远不会出现的 runtime.env，拿不到带 token 的地址。
+#
+# ⚠️ 下面两行必须与 paths.js 的 runtimeDir / logFile 逐字一致：
+#      runtimeDir = $DSH_DESKTOP_ROOT/runtime/dsh-desktop
+#      logFile    = $DSH_DESKTOP_ROOT/runtime/dsh-desktop-web.log
+if [ -n "${DSH_DESKTOP_ROOT:-}" ]; then
+  RUNTIME_DIR="$DSH_DESKTOP_ROOT/runtime/dsh-desktop"
+  LOG_FILE="$DSH_DESKTOP_ROOT/runtime/dsh-desktop-web.log"
+fi
+
+RUNTIME_ENV="$RUNTIME_DIR/runtime.env"
+RUNTIME_JSON="$RUNTIME_DIR/runtime.json"
 
 # 独立窗口进程存活时间短于这个秒数，就认为发生了「移交给既有浏览器进程」
 # 或启动失败 —— 两种情况都不能据此判定「窗口已关闭」。
@@ -244,10 +271,10 @@ start_server() {
   mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
   : >"$LOG_FILE" 2>/dev/null || true
 
-  log "拉起 dsh web：$DSH_BIN web --no-open --port $PORT"
+  log "拉起 dsh（profile $DSH_PROFILE）：$DSH_BIN --profile $DSH_PROFILE --no-open --port $PORT"
   # setsid 让服务脱离本脚本的进程组：脚本退出（比如窗口秒关）不会连带打死服务，
   # 同时它自己成为一个新进程组的组长，方便稍后整组回收。
-  PATH="$EXTRA_PATH:$PATH" setsid "$DSH_BIN" web --no-open --port "$PORT" --host "$HOST" >>"$LOG_FILE" 2>&1 &
+  PATH="$EXTRA_PATH:$PATH" setsid "$DSH_BIN" --profile "$DSH_PROFILE" --no-open --port "$PORT" --host "$HOST" >>"$LOG_FILE" 2>&1 &
   SERVER_PID=$!
 }
 

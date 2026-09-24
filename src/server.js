@@ -40,11 +40,15 @@ export function readProcessCommand(pid) {
 /**
  * 判断某个 pid 是不是一个 dsh web 进程。
  *
- * 这是所有「停止服务」操作的最后一道闸：只认命令行里既有 dsh 又有 `web`
- * 子命令的进程。宁可拒绝停一个可疑进程，也不能误杀用户别的东西。
+ * 这是所有「停止服务」操作的最后一道闸：宁可拒绝停一个可疑进程，也不能误杀
+ * 用户别的东西。所以判据只认「命令行里既有 dsh，又确实在跑 web 界面」。
  *
- * 实测的 cmdline 形如：
+ * 实测的 cmdline 有两种等价写法，**都必须认**：
  *   ['node', '/home/<user>/.npm-global/bin/dsh', 'web', '--no-open', '--port', '3080']
+ *   ['node', '/home/<user>/.npm-global/bin/dsh', '--profile', 'web-dev', '--no-open', …]
+ *
+ * 第二种是 0.5.0 起启动器与 `dsh-desktop start` 的统一写法。它**不含 `web` 这个词** ——
+ * 只认子命令的话，`dsh-desktop stop` 会认不出自己刚拉起的服务并拒绝停它。
  *
  * @param {number} pid
  * @returns {{ ok: boolean, reason: string, command: string | null }}
@@ -59,8 +63,16 @@ export function isDshWebProcess(pid) {
   const mentionsDsh = argv.some((arg) => /(^|[/\\])dsh(\.js)?$/.test(arg)) || /@deepseek-ai[/\\]dsh/.test(command)
   const hasWebSubcommand = argv.includes('web')
 
+  // `--profile` 后面必须跟一个不像选项的值，否则 `--profile --no-open` 也会被当成
+  // 「指定了 profile」，把判据放得过宽。
+  const profileAt = argv.indexOf('--profile')
+  const profileValue = profileAt >= 0 ? argv[profileAt + 1] : undefined
+  const hasProfile = typeof profileValue === 'string' && profileValue.length > 0 && !profileValue.startsWith('-')
+
   if (!mentionsDsh) return { ok: false, reason: `进程 ${pid} 的命令行里没有 dsh：${command}`, command }
-  if (!hasWebSubcommand) return { ok: false, reason: `进程 ${pid} 不是 web 子命令：${command}`, command }
+  if (!hasWebSubcommand && !hasProfile) {
+    return { ok: false, reason: `进程 ${pid} 既不是 web 子命令，也没有 --profile：${command}`, command }
+  }
   return { ok: true, reason: 'ok', command }
 }
 
@@ -232,15 +244,19 @@ async function waitForExit(pid, timeoutMs) {
  * @param {string} options.dshBin
  * @param {string} options.host
  * @param {number} options.port
+ * @param {string} [options.profile] 要启动的 dsh profile，默认 `web`。
  * @param {string} options.logFile
  * @param {NodeJS.ProcessEnv} [options.env]
  * @returns {number} 新进程的 pid
  */
-export function startServerDetached({ dshBin, host, port, logFile, env = process.env }) {
+export function startServerDetached({ dshBin, host, port, profile = 'web', logFile, env = process.env }) {
   fs.mkdirSync(logFile.replace(/\/[^/]+$/, ''), { recursive: true })
   const out = fs.openSync(logFile, 'a')
 
-  const child = spawn(dshBin, ['web', '--no-open', '--port', String(port), '--host', host], {
+  // 统一用 `--profile <名字>` 而不是 `web` 子命令：两者完全等价（`dsh web` 就是
+  // `dsh --profile web`），但只有前者能表达自定义 profile。改这里必须同步改
+  // isDshWebProcess —— 它的身份判据要认这种新写法。
+  const child = spawn(dshBin, ['--profile', profile, '--no-open', '--port', String(port), '--host', host], {
     detached: true,
     stdio: ['ignore', out, out],
     env,

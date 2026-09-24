@@ -124,6 +124,8 @@ The config file is `~/.config/dsh-desktop/config.json`, created automatically on
 | `window` | Initial standalone window size, in logical pixels. |
 | `browser` | `auto`, or `chrome` / `chromium` / `brave` / `edge` / `vivaldi` / `opera`, or an absolute path to a browser executable. |
 | `profileMode` | `dedicated` (default) or `shared`. |
+| `profile` | Which dsh profile the desktop icon starts. Default `web` (equivalent to `dsh web`). |
+| `devProfile` | When non-empty, the desktop entry gains a "run with development profile" context-menu action. See "Daily and development setups" below. |
 | `autoInstall` | Whether to auto-install or self-repair on `dsh web` boot. |
 | `manageKwinRules` | Whether to manage the KWin window rule; only effective on KDE. |
 | `manageHyprlandRules` | Whether to manage the Hyprland window rule; only effective on Hyprland. **Off by default** — see "Hyprland and window size" below. |
@@ -158,6 +160,38 @@ When Chrome is already running, executing `chrome --app=URL` hands the window of
 |---|---|---|
 | `dedicated` (default) | `--user-data-dir` points at a dedicated profile directory, so the browser process lives and dies with the window and window close can be detected reliably | One extra browser process; a separate cookie jar that authenticates via the token URL on first launch and is then good for 30 days |
 | `shared` | Reuses the default browser profile directory | Shared login state, no extra process; but when Chrome is already running the window close cannot be detected, so the service is not stopped automatically — a notification explains this |
+
+### Daily and development setups
+
+`dsh web` and `dsh --profile web` are exactly equivalent, and the desktop icon runs the former. So by default **the profile the icon starts is your daily environment**.
+
+If you develop a plugin (with the source checkout `link:`ed into a profile), that working tree *is* the running plugin: saving a client file hot-reloads it into the browser, and one bad line of host code means the next restart does not come up. Pointing `devProfile` at another profile separates the two completely:
+
+```json
+{
+  "profile": "web",
+  "devProfile": "web-dev"
+}
+```
+
+- **Click the icon** → `web` (install a published, frozen version here — keep it stable)
+- **Right-click → "Run with development profile"** → `web-dev` (point this at your source checkout)
+
+That context-menu action always carries three environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `DSH_DESKTOP_PROFILE` | Switches to the profile named by `devProfile`. |
+| `DSH_DESKTOP_PORT` | Uses `port + 1`. Without a different port, the second setup's server probe would hit the first one and simply reuse it — so the right-click action would show you the daily setup again. |
+| `DSH_DESKTOP_ROOT` | The sandbox root (`$XDG_CACHE_HOME/dsh-desktop-dev`). **This one is not optional**: the plugin's auto-install writes `~/.local/bin` and `~/.local/share/applications`, and those are **not** separated per profile. Without the sandbox, starting once with development code overwrites the daily setup's launcher and desktop entry. |
+
+All three can also be set by hand, so the development setup works without the context-menu action:
+
+```bash
+DSH_DESKTOP_ROOT=~/.cache/dsh-desktop-dev dsh --profile web-dev --no-open --port 3081
+```
+
+`dsh-desktop start` / `restart` use the profile named by `profile`; `stop` identifies the service from its command line and accepts both spellings (`dsh web` and `dsh --profile <name>`).
 
 ## Hyprland and window size
 
@@ -271,7 +305,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 Run these from the repository root:
 
 ```bash
-node test/smoke.mjs                                   # smoke tests, 121 checks total, zero dependencies
+node test/smoke.mjs                                   # smoke tests, 135 checks total, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
 node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touches nothing real

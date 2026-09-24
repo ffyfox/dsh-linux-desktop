@@ -3,6 +3,36 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.0] - 2026-09-25
+
+让「日常用的那套」和「开发用的那套」能彻底分家，并给发布加了一道隐私闸门。
+
+### 新增
+
+- **`profile` 配置项**：桌面图标启动哪个 dsh profile，默认 `web`（与 `dsh web` 等价）。启动器与 `dsh-desktop start` 统一改用 `dsh --profile <名字>` 拉起。
+- **`devProfile` 配置项**：非空时，桌面入口右键菜单多一个「以开发配置运行」。该动作自动带上三个环境变量 —— `DSH_DESKTOP_PROFILE`（切 profile）、`DSH_DESKTOP_PORT`（`port + 1`）、`DSH_DESKTOP_ROOT`（`$XDG_CACHE_HOME/dsh-desktop-dev` 沙箱）。
+- 启动脚本认这三个变量覆盖；设了 `DSH_DESKTOP_ROOT` 时按 `paths.js` 的同一套规则重算运行时目录与日志路径。
+
+### 为什么
+
+`dsh web` 就是 `dsh --profile web`，而图标走的就是它。所以当插件以 `link:` 方式装着的时候，**工作区就是正在跑的插件**：存一下客户端文件它立刻热更进浏览器，写错一行宿主代码重启就起不来 —— 而那正是你唯一能跟 agent 对话的窗口。
+
+分家之后：点图标跑冻结版本，右键跑源码仓库。两者端口不同（`port` 与 `port + 1`），可以同时开着对照。
+
+⚠️ 沙箱不能省：插件的自动安装会写 `~/.local/bin` 与 `~/.local/share/applications`，而这些**不随 profile 分家**。只设 `XDG_*` 也不够 —— `paths.js` 的 `binDir` 写死在 `$HOME/.local/bin`。
+
+### 修正
+
+- **`isDshWebProcess` 原先只认 `web` 子命令。** 拉起命令改成 `--profile <名字>` 后 argv 里不再有 `web`，`dsh-desktop stop` 会认不出自己刚拉起的服务并拒绝停它。现在两种写法都认，且不接受 `--profile` 后面跟的是另一个选项。
+
+### 发布前校验
+
+- **新增第 9 项：隐私指纹。** 扫描全部被跟踪文件，拦截本机家目录、用户名、主机名，以及私钥块、疑似密钥 / JWT / launch token、手机号、邮箱（`@users.noreply.github.com` 除外）。指纹在**运行时从环境推导，不写进仓库**；命中时输出打码，只留文件:行号。
+
+### 其它
+
+- 新增用例 14 项（121 → 135）。
+
 ## [0.4.2] - 2026-09-25
 
 修掉 DSH 0.1.7 一次服务改名导致插件行卡死的问题，并发布到 npm。

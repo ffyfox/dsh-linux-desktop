@@ -124,6 +124,8 @@ dsh plugin --profile web exec dsh-desktop <子命令>
 | `window` | 独立窗口的初始尺寸，逻辑像素。 |
 | `browser` | `auto`，或 `chrome` / `chromium` / `brave` / `edge` / `vivaldi` / `opera`，或浏览器可执行文件的绝对路径。 |
 | `profileMode` | `dedicated`（默认）或 `shared`。 |
+| `profile` | 桌面图标启动哪个 dsh profile。默认 `web`（与 `dsh web` 等价）。 |
+| `devProfile` | 非空时，桌面入口右键菜单多一个「以开发配置运行」。见下文「日常那套与开发那套」。 |
 | `autoInstall` | 是否在 `dsh web` 启动时自动安装或自愈。 |
 | `manageKwinRules` | 是否托管 KWin 窗口规则，仅 KDE 生效。 |
 | `manageHyprlandRules` | 是否托管 Hyprland 窗口规则，仅 Hyprland 生效。**默认关闭**，见下文「Hyprland 与窗口尺寸」。 |
@@ -157,6 +159,38 @@ Chrome 已在运行时执行 `chrome --app=URL` 会把窗口移交给既有浏�
 |---|---|---|
 | `dedicated`（默认） | 用 `--user-data-dir` 指向独立配置目录，浏览器进程与窗口同生共死，因此可以可靠地感知窗口关闭 | 多一个浏览器进程；独立的 cookie 罐，首次通过 token 地址登录，之后 30 天免登录 |
 | `shared` | 复用默认浏览器配置目录 | 共享登录态，无额外进程；但 Chrome 已在运行时无法感知窗口关闭，因此不会自动停止服务，此时会弹出通知说明 |
+
+### 日常那套与开发那套
+
+`dsh web` 与 `dsh --profile web` 完全等价，而桌面图标走的就是它。所以默认情况下，**图标启动的 profile 就是你的日常环境**。
+
+如果你在开发插件（把源码仓库 `link:` 进 profile），那么工作区**就是**正在跑的插件：存一下客户端文件它立刻热更进浏览器，写错一行宿主代码重启就起不来。把 `devProfile` 指向另一个 profile，日常和开发就能彻底分家：
+
+```json
+{
+  "profile": "web",
+  "devProfile": "web-dev"
+}
+```
+
+- **点图标** → `web`（建议装已发布的冻结版本，稳定）
+- **右键 →「以开发配置运行」** → `web-dev`（建议 `link:` 到源码仓库）
+
+那个右键动作会自动带上三个环境变量：
+
+| 变量 | 作用 |
+|---|---|
+| `DSH_DESKTOP_PROFILE` | 切到 `devProfile` 指定的 profile。 |
+| `DSH_DESKTOP_PORT` | 换成 `port + 1`。不换端口的话，第二套的服务探测会命中第一套并直接复用它 —— 右键点开看到的还是日常那套。 |
+| `DSH_DESKTOP_ROOT` | 沙箱根目录（`$XDG_CACHE_HOME/dsh-desktop-dev`）。**这一项不能省**：插件的自动安装会写 `~/.local/bin` 与 `~/.local/share/applications`，而这些**不随 profile 分家**。没有沙箱，用开发版代码启动一次就会覆盖掉日常那套的启动器与桌面入口。 |
+
+三个变量都能在命令行上手动覆盖，所以不用右键动作也可以这样起开发那套：
+
+```bash
+DSH_DESKTOP_ROOT=~/.cache/dsh-desktop-dev dsh --profile web-dev --no-open --port 3081
+```
+
+`dsh-desktop` 的 `start` / `restart` 走 `profile` 指定的那套；`stop` 按进程命令行识别服务，两种写法（`dsh web` 与 `dsh --profile <名字>`）都认。
 
 ## Hyprland 与窗口尺寸
 
@@ -270,7 +304,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 在仓库根目录执行：
 
 ```bash
-node test/smoke.mjs                                   # 冒烟测试，用例共 121 项，零依赖
+node test/smoke.mjs                                   # 冒烟测试，用例共 135 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
 node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录

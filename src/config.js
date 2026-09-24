@@ -28,6 +28,26 @@ export function defaultConfig() {
     /** dsh web 监听的端口。 */
     port: 3080,
 
+    /**
+     * 桌面图标启动哪个 dsh profile。
+     *
+     * `dsh web` 与 `dsh --profile web` 完全等价，而图标走的就是前者；所以这一项
+     * 决定的是「点图标时到底跑哪一套」。默认 `web`，与 dsh 自己的默认一致。
+     */
+    profile: 'web',
+
+    /**
+     * 非空时，桌面入口会多一个「以开发配置运行」的右键动作，用它启动这个 profile。
+     *
+     * 典型用法：`web` 里装的是已发布的冻结版本（稳定，源码改坏了也不影响日常），
+     * `web-dev` 里 `link:` 到源码仓库（改了立刻生效，客户端半边还有热更）。
+     * 点图标是前者，右键是后者。
+     *
+     * 该动作会自动带上沙箱（见 paths.js 的 devRootDir）和 `port + 1` 端口，所以
+     * 两套能同时开着对照，而且开发版的自动安装碰不到你真实的桌面集成。
+     */
+    devProfile: '',
+
     /** 独立窗口的初始尺寸（逻辑像素）。 */
     window: { width: 1200, height: 750 },
 
@@ -105,6 +125,28 @@ export function normalizeConfig(raw) {
 
   config.port = normalizePort(input.port, defaults.port, warnings, 'port')
 
+  // profile 名会原样进 `dsh --profile <名字>`，也会被 dsh 拼成
+  // `$DSH_HOME/profiles/<名字>` —— 所以校验规则必须跟 dsh 自己的
+  // `resolveProfileDir` 一致，否则这里放行的名字到 dsh 那里会炸。
+  for (const key of ['profile', 'devProfile']) {
+    if (input[key] === undefined) continue
+    if (typeof input[key] !== 'string') {
+      warnings.push(`${key} 必须是字符串，已使用默认值 ${defaults[key] || '(空)'}`)
+      continue
+    }
+    const name = input[key].trim()
+    if (key === 'devProfile' && name === '') {
+      config.devProfile = ''
+      continue
+    }
+    const problem = profileNameProblem(name)
+    if (problem) {
+      warnings.push(`${key} ${problem}，已使用默认值 ${defaults[key] || '(空)'}`)
+      continue
+    }
+    config[key] = name
+  }
+
   if (input.window && typeof input.window === 'object') {
     config.window = {
       width: normalizeDimension(input.window.width, defaults.window.width, warnings, 'window.width'),
@@ -137,6 +179,23 @@ export function normalizeConfig(raw) {
   }
 
   return { config, warnings }
+}
+
+/**
+ * 校验一个 profile 名，返回问题描述（空串表示合法）。
+ *
+ * 规则照抄 dsh 的 `resolveProfileDir`：空、含路径分隔符、`.`、`..`、`node_modules`
+ * 全部拒绝。不照抄的话，这里放行的名字到 dsh 那里会直接抛错。
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+function profileNameProblem(name) {
+  if (name === '') return '不能为空'
+  if (name.includes('/') || name.includes('\\')) return '不能含路径分隔符'
+  if (name === '.' || name === '..') return '不能是 . 或 ..'
+  if (name === 'node_modules') return '不能叫 node_modules'
+  return ''
 }
 
 function normalizePort(value, fallback, warnings, label) {

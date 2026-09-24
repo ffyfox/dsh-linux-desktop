@@ -70,7 +70,8 @@ export const CLI_SHIM_FILENAME = 'dsh-desktop'
  * @param {NodeJS.ProcessEnv} [env] 环境变量来源，默认 `process.env`。
  * @returns {{
  *   home: string, sandboxed: boolean,
- *   configHome: string, dataHome: string, runtimeHome: string,
+ *   configHome: string, dataHome: string, cacheHome: string, runtimeHome: string,
+ *   devRootDir: string,
  *   binDir: string, configDir: string, configFile: string,
  *   applicationsDir: string, desktopEntryFile: string,
  *   iconThemeDir: string, iconSizes: number[],
@@ -92,6 +93,7 @@ export function resolvePaths(env = process.env) {
 
   const xdgConfigHome = !sandboxed && env.XDG_CONFIG_HOME ? env.XDG_CONFIG_HOME : path.join(effectiveHome, '.config')
   const xdgDataHome = !sandboxed && env.XDG_DATA_HOME ? env.XDG_DATA_HOME : path.join(effectiveHome, '.local', 'share')
+  const xdgCacheHome = !sandboxed && env.XDG_CACHE_HOME ? env.XDG_CACHE_HOME : path.join(effectiveHome, '.cache')
 
   // XDG_RUNTIME_DIR 是「本次登录会话」的临时目录，注销即清空 —— 正好适合放
   // 运行时状态（端口 / 进程号 / 带 token 的地址）。沙箱模式或没有该变量时
@@ -115,7 +117,21 @@ export function resolvePaths(env = process.env) {
 
     configHome: xdgConfigHome,
     dataHome: xdgDataHome,
+    cacheHome: xdgCacheHome,
     runtimeHome: xdgRuntimeHome,
+
+    /**
+     * 「开发模式」用的沙箱根目录。
+     *
+     * 它同时被两处引用，必须一致：桌面入口的右键动作把它作为 `DSH_DESKTOP_ROOT`
+     * 传给启动器，而插件读同一个变量后会把 config / data / runtime / bin **全部**
+     * 重定向到这里（见本文件顶部的推导）。
+     *
+     * 为什么需要它：插件的 `autoInstall` 会写 `~/.local/bin` 与
+     * `~/.local/share/applications`，这些**不随 profile 分家**。没有这层沙箱，
+     * 用开发版代码启动一次就会覆盖掉日常那套的启动器与桌面入口。
+     */
+    devRootDir: path.join(xdgCacheHome, `${APP_DIRNAME}-dev`),
 
     binDir: path.join(effectiveHome, '.local', 'bin'),
     configDir,

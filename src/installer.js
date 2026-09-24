@@ -380,6 +380,7 @@ export function install(options = {}) {
       BROWSER: browser.execPath,
       BROWSER_LABEL: browser.label,
       PROFILE_MODE: config.profileMode,
+      PROFILE: config.profile,
       PROFILE_DIR: paths.chromeProfileDir,
       RUNTIME_DIR: paths.runtimeDir,
       LOG_FILE: paths.logFile,
@@ -426,12 +427,25 @@ export function install(options = {}) {
       warnings.push('未能解析 dsh 的绝对路径，右键动作里的 dsh 依赖桌面会话的 PATH，可能无法启动。')
     }
 
+    // 「以开发配置运行」动作。只在配置了 devProfile 时才生成。
+    //
+    // 端口取 `port + 1`：两套必须落在不同端口上，否则第二套的 server_up 探测会
+    // 命中第一套并直接复用它 —— 右键点开看到的还是日常那套，动作等于失效。
+    const devAction = config.devProfile
+      ? {
+          profile: config.devProfile,
+          port: config.port >= 65535 ? config.port - 1 : config.port + 1,
+          root: paths.devRootDir,
+        }
+      : null
+
     const entryContent = renderDesktopEntry({
       config,
       launcherPath: paths.launcherFile,
       appId,
       iconName: ICON_NAME,
       terminalCommand,
+      devAction,
       version,
     })
 

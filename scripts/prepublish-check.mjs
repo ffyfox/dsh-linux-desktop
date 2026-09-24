@@ -15,10 +15,12 @@
  *   6. 打包产物里包含全部运行时文件
  *   7. README 卫生（没有残留占位符；指向 docs/ 的链接是绝对 URL；声明的用例数量与实际一致）
  *   8. 工作区干净（会进包的文件都已提交 —— npm 打包的是工作区，不是某个提交）
+ *   9. 隐私指纹（本机路径 / 用户名 / 主机名 / 密钥 / 邮箱不出现在任何被跟踪文件里）
  */
 
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -240,6 +242,125 @@ try {
 } catch (error) {
   // 不是 git 仓库（例如从 tarball 里发布）时不阻塞，但要说清楚没检查。
   notes.push(`未检查工作区是否干净（git 不可用或不是 git 仓库：${error.code ?? error.message}）`)
+}
+
+// ---- 9. 隐私指纹 ----------------------------------------------------------
+// 由来：这个插件的开发、日常使用和发布都发生在同一台机器上，工作区里很容易
+// 混进只有本机才看得懂的东西 —— 绝对路径、用户名、主机名、内网端点。而公开的
+// GitHub 仓库会暴露**全部被跟踪文件**（npm 只发 files 白名单，是它的子集），
+// 两者都不可逆。
+//
+// 指纹**全部在运行时从环境推导，绝不写进仓库**：否则这道闸门自己就成了泄露源。
+// 副作用是换一台机器开发时，它会自动改盯那台机器的身份。
+const PRIVACY_FINGERPRINTS = (() => {
+  const collected = []
+  const seen = new Set()
+  const add = (label, value) => {
+    const text = String(value ?? '').trim()
+    // 短值做子串匹配会满屏误报，所以 4 个字符以下直接不盯（并记一笔说明）。
+    if (text.length < 4 || seen.has(text)) return
+    seen.add(text)
+    collected.push({ label, text })
+  }
+
+  add('家目录', os.homedir())
+  add('$HOME', process.env.HOME)
+  try {
+    add('用户名', os.userInfo().username)
+  } catch {
+    /* 拿不到就跳过 */
+  }
+  add('$USER', process.env.USER)
+  add('主机名', os.hostname())
+
+  return collected
+})()
+
+/** 通用隐私 / 凭证模式。`allow` 命中时不算问题（GitHub 的 noreply 地址是刻意公开的）。 */
+const PRIVACY_PATTERNS = [
+  { label: '私钥块', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  {
+    label: '疑似密钥或令牌',
+    re: /\b(?:sk-[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/,
+  },
+  { label: '疑似 JWT', re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./ },
+  // README 里的 `?token=...` 是占位符，够不到这里的长度门槛。
+  { label: '疑似真实 launch token', re: /token=[A-Za-z0-9._-]{20,}/ },
+  { label: '手机号', re: /(?<![0-9A-Za-z])1[3-9]\d{9}(?![0-9A-Za-z])/ },
+  {
+    label: '邮箱地址',
+    re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+    allow: /@users\.noreply\.github\.com$/i,
+  },
+]
+
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const fingerprintRe = (text) => (text.length >= 6 ? escapeRe(text) : `\\b${escapeRe(text)}\\b`)
+
+/**
+ * 把命中值打码。
+ *
+ * 校验输出会进终端、CI 日志，也可能被贴进 issue —— 真扫到凭证时，**不能**把凭证
+ * 本身再打印一遍，那等于换个地方泄露。只留前 4 个字符，定位靠文件:行号。
+ */
+const redact = (text) => (text.length <= 4 ? '****' : `${text.slice(0, 4)}****（已打码，共 ${text.length} 字符）`)
+
+try {
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' })
+    .split('\0')
+    .filter(Boolean)
+
+  const hits = []
+  let scanned = 0
+
+  for (const rel of tracked) {
+    let buffer
+    try {
+      buffer = fs.readFileSync(path.join(ROOT, rel))
+    } catch {
+      continue
+    }
+    // 位图之类按二进制跳过 —— 它们既读不成行，也不可能"混进"文本指纹。
+    if (buffer.subarray(0, 8000).includes(0)) continue
+    scanned += 1
+
+    const lines = buffer.toString('utf8').split('\n')
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]
+      const where = `${rel}:${index + 1}`
+
+      for (const { label, text } of PRIVACY_FINGERPRINTS) {
+        if (new RegExp(fingerprintRe(text)).test(line)) {
+          // 标签里**不能**带上指纹原文 —— 输出会进终端和 CI 日志，那等于把
+          // 刚发现的东西换个地方再泄露一次。定位靠文件:行号。
+          hits.push({ label, where, sample: text })
+        }
+      }
+
+      for (const { label, re, allow } of PRIVACY_PATTERNS) {
+        const matches = line.match(re)
+        if (!matches) continue
+        const real = matches.filter((match) => !(allow && allow.test(match)))
+        if (real.length > 0) hits.push({ label, where, sample: real[0] })
+      }
+    }
+  }
+
+  if (hits.length === 0) {
+    const watched = PRIVACY_FINGERPRINTS.map((item) => item.label).join('、')
+    ok(`隐私指纹干净（扫了 ${scanned} 个被跟踪文件；盯着 ${watched} 与密钥/邮箱模式）`)
+  } else {
+    const shown = hits
+      .slice(0, 8)
+      .map((hit) => `${hit.where} — ${hit.label}：${redact(hit.sample)}`)
+      .join('\n      ')
+    fail(
+      `有隐私指纹会被公开（${hits.length} 处）：\n      ${shown}`,
+      '公开的 GitHub 仓库会暴露全部被跟踪文件；把这些内容挪出仓库或换成占位符再发布',
+    )
+  }
+} catch (error) {
+  notes.push(`未检查隐私指纹（git 不可用或不是 git 仓库：${error.code ?? error.message}）`)
 }
 
 // ---- 结论 ----------------------------------------------------------------

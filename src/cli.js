@@ -413,8 +413,15 @@ export async function run(argv, io = {}) {
         return 1
       }
 
-      const pid = startServerDetached({ dshBin, host, port, logFile: paths.logFile, env })
-      out.write(`${p.dim(`已启动 dsh web（进程 ${pid}），等待就绪…`)}\n`)
+      const pid = startServerDetached({
+        dshBin,
+        host,
+        port,
+        profile: restartConfig.profile,
+        logFile: paths.logFile,
+        env,
+      })
+      out.write(`${p.dim(`已启动 dsh（profile ${restartConfig.profile}，进程 ${pid}），等待就绪…`)}\n`)
 
       const ready = await waitForServer({ host, port, timeoutMs: 45000 })
       if (!ready) {

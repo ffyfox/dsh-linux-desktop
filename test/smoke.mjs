@@ -208,6 +208,53 @@ await test('提供终端命令时生成 Desktop Action', () => {
   assert.match(content, /^\[Desktop Action TUI\]$/m)
 })
 
+await test('配置了 devProfile 时生成「以开发配置运行」动作', () => {
+  const content = renderDesktopEntry({
+    config: { ...defaultConfig(), devProfile: 'web-dev' },
+    launcherPath: '/home/u/.local/bin/dsh-desktop-app',
+    appId: 'chrome-127.0.0.1__-Default',
+    iconName: 'deepseek-harness',
+    terminalCommand: '',
+    devAction: { profile: 'web-dev', port: 3081, root: '/home/u/.cache/dsh-desktop-dev' },
+    version: '9.9.9',
+  })
+  assert.match(content, /^Actions=Dev;$/m)
+  assert.match(content, /^\[Desktop Action Dev\]$/m)
+  // 三个变量缺一不可：profile 换套、port 防命中日常那套、root 是沙箱。
+  assert.match(
+    content,
+    /^Exec=env DSH_DESKTOP_PROFILE=web-dev DSH_DESKTOP_PORT=3081 DSH_DESKTOP_ROOT=\/home\/u\/\.cache\/dsh-desktop-dev \/home\/u\/\.local\/bin\/dsh-desktop-app$/m,
+  )
+})
+
+await test('没有 devAction 时不留任何 Dev 痕迹', () => {
+  const content = renderDesktopEntry({
+    config: defaultConfig(),
+    launcherPath: '/x',
+    appId: 'a',
+    iconName: 'i',
+    terminalCommand: '',
+    version: '1.0.0',
+  })
+  assert.ok(!content.includes('[Desktop Action Dev]'), '默认配置不应生成开发动作')
+  assert.ok(!content.includes('DSH_DESKTOP_PROFILE='), '默认配置不应注入 profile 环境变量')
+  assert.ok(!content.includes('Actions='), '默认配置不应有 Actions 行')
+})
+
+await test('终端动作与开发动作同时存在时顺序稳定', () => {
+  const content = renderDesktopEntry({
+    config: { ...defaultConfig(), devProfile: 'web-dev' },
+    launcherPath: '/x',
+    appId: 'a',
+    iconName: 'i',
+    terminalCommand: '/usr/bin/konsole -e dsh --profile dsh-tui',
+    devAction: { profile: 'web-dev', port: 3081, root: '/r' },
+    version: '1.0.0',
+  })
+  assert.match(content, /^Actions=TUI;Dev;$/m)
+  assert.ok(content.indexOf('[Desktop Action TUI]') < content.indexOf('[Desktop Action Dev]'))
+})
+
 // ---------------------------------------------------------------------------
 section('kwinrulesrc 安全读写')
 // ---------------------------------------------------------------------------
@@ -1073,6 +1120,53 @@ await test('非法值回落到默认并给出警告', () => {
   assert.equal(warnings.length, 4)
 })
 
+await test('profile / devProfile 默认值：图标跑 web，没有开发动作', () => {
+  const config = defaultConfig()
+  assert.equal(config.profile, 'web')
+  assert.equal(config.devProfile, '')
+})
+
+await test('profile 名按 dsh 的 resolveProfileDir 规则校验', () => {
+  // 合法：自定义 profile 名照单全收。
+  for (const name of ['web', 'web-dev', 'dev_2', 'a.b']) {
+    const { config, warnings } = normalizeConfig({ profile: name })
+    assert.equal(config.profile, name, `${name} 应被接受`)
+    assert.deepEqual(warnings, [])
+  }
+
+  // 非法：这些名字到 dsh 那里会直接抛错，必须在这里就回落。
+  for (const [name, expected] of [
+    ['a/b', /路径分隔符/],
+    ['a\\b', /路径分隔符/],
+    ['.', /\. 或 \.\./],
+    ['..', /\. 或 \.\./],
+    ['node_modules', /node_modules/],
+    ['', /不能为空/],
+    ['   ', /不能为空/],
+    [42, /必须是字符串/],
+  ]) {
+    const { config, warnings } = normalizeConfig({ profile: name })
+    assert.equal(config.profile, 'web', `${String(name)} 应回落到 web`)
+    assert.equal(warnings.length, 1, `${String(name)} 应给出一条警告`)
+    assert.match(warnings[0], expected)
+  }
+})
+
+await test('devProfile 允许为空（表示不生成开发动作）', () => {
+  const { config, warnings } = normalizeConfig({ devProfile: '' })
+  assert.equal(config.devProfile, '')
+  assert.deepEqual(warnings, [])
+})
+
+await test('devProfile 非空时同样受 profile 名校验约束', () => {
+  const ok = normalizeConfig({ devProfile: 'web-dev' })
+  assert.equal(ok.config.devProfile, 'web-dev')
+
+  const bad = normalizeConfig({ devProfile: '../etc' })
+  assert.equal(bad.config.devProfile, '')
+  assert.match(bad.warnings[0], /路径分隔符/)
+})
+
 await test('字符串端口与尺寸被接受', () => {
   const { config } = normalizeConfig({ port: '8080', window: { width: '1000', height: '700' } })
   assert.equal(config.port, 8080)
@@ -1241,7 +1335,7 @@ await test('全部占位符被替换后不残留 @@..@@', () => {
   const template = fs.readFileSync(path.join(ROOT, 'src/assets/launcher.sh.tpl'), 'utf8')
   const keys = [
     'VERSION', 'CONFIG_FILE', 'HOST', 'PORT', 'WINDOW_SIZE', 'BROWSER', 'BROWSER_LABEL',
-    'PROFILE_MODE', 'PROFILE_DIR', 'RUNTIME_DIR', 'LOG_FILE', 'DSH_BIN', 'EXTRA_PATH',
+    'PROFILE_MODE', 'PROFILE', 'PROFILE_DIR', 'RUNTIME_DIR', 'LOG_FILE', 'DSH_BIN', 'EXTRA_PATH',
   ]
   const values = Object.fromEntries(keys.map((k) => [k, `V-${k}`]))
   const output = renderTemplate(template, values)
@@ -1259,8 +1353,53 @@ await test('模板里不存在被误当成占位符的其它 @@ 结构', () => {
   const unique = [...new Set(found)].sort()
   assert.deepEqual(unique, [
     'BROWSER', 'BROWSER_LABEL', 'CONFIG_FILE', 'DSH_BIN', 'EXTRA_PATH', 'HOST', 'LOG_FILE',
-    'PORT', 'PROFILE_DIR', 'PROFILE_MODE', 'RUNTIME_DIR', 'VERSION', 'WINDOW_SIZE',
+    'PORT', 'PROFILE', 'PROFILE_DIR', 'PROFILE_MODE', 'RUNTIME_DIR', 'VERSION', 'WINDOW_SIZE',
   ])
+})
+
+await test('启动脚本用 --profile 拉起，不再硬编码 web 子命令', () => {
+  const template = fs.readFileSync(path.join(ROOT, 'src/assets/launcher.sh.tpl'), 'utf8')
+  assert.match(template, /setsid "\$DSH_BIN" --profile "\$DSH_PROFILE" --no-open/)
+  // 只认 web 子命令的写法一旦回来，isDshWebProcess 就会和拉起命令对不上。
+  assert.ok(!/"\$DSH_BIN" web /.test(template), '拉起命令不应再硬编码 web 子命令')
+})
+
+await test('启动脚本认三个环境变量覆盖', () => {
+  const template = fs.readFileSync(path.join(ROOT, 'src/assets/launcher.sh.tpl'), 'utf8')
+  assert.match(template, /DSH_PROFILE="\$\{DSH_DESKTOP_PROFILE:-@@PROFILE@@\}"/)
+  assert.match(template, /PORT="\$\{DSH_DESKTOP_PORT:-@@PORT@@\}"/)
+  assert.match(template, /if \[ -n "\$\{DSH_DESKTOP_ROOT:-\}" \]; then/)
+})
+
+await test('沙箱覆盖下的运行时路径与 paths.js 推导逐字一致', () => {
+  const template = fs.readFileSync(path.join(ROOT, 'src/assets/launcher.sh.tpl'), 'utf8')
+  const paths = resolvePaths({ HOME: '/h', DSH_DESKTOP_ROOT: '/sandbox' })
+
+  // 启动脚本里写的是 $DSH_DESKTOP_ROOT/... 的形式；把 paths.js 的推导结果按同样
+  // 的方式改写，两边必须完全对得上 —— 对不上就会去真实目录找一个永远不会出现的
+  // runtime.env，拿不到带 token 的地址。
+  const asTemplatePath = (value) => value.replace(/^\/sandbox/, '$DSH_DESKTOP_ROOT')
+  assert.ok(
+    template.includes(asTemplatePath(paths.runtimeDir)),
+    `模板缺少运行时目录 ${asTemplatePath(paths.runtimeDir)}`,
+  )
+  assert.ok(
+    template.includes(asTemplatePath(paths.logFile)),
+    `模板缺少日志路径 ${asTemplatePath(paths.logFile)}`,
+  )
+})
+
+await test('渲染出的启动脚本语法合法', () => {
+  const template = fs.readFileSync(path.join(ROOT, 'src/assets/launcher.sh.tpl'), 'utf8')
+  const keys = [
+    'VERSION', 'CONFIG_FILE', 'HOST', 'PORT', 'WINDOW_SIZE', 'BROWSER', 'BROWSER_LABEL',
+    'PROFILE_MODE', 'PROFILE', 'PROFILE_DIR', 'RUNTIME_DIR', 'LOG_FILE', 'DSH_BIN', 'EXTRA_PATH',
+  ]
+  const script = renderTemplate(template, Object.fromEntries(keys.map((k) => [k, `V-${k}`])))
+  const file = path.join(makeSandbox('tplsyntax'), 'launcher.sh')
+  fs.writeFileSync(file, script)
+  // `bash -n` 只做语法解析，不执行 —— 模板里任何一个没闭合的 if 都会在这里露出来。
+  execFileSync('bash', ['-n', file], { stdio: 'pipe' })
 })
 
 // ---------------------------------------------------------------------------
@@ -1290,6 +1429,15 @@ await test('非沙箱模式遵循 XDG 变量', () => {
   assert.equal(paths.configDir, '/c/dsh-desktop')
   assert.equal(paths.applicationsDir, '/d/applications')
   assert.equal(paths.runtimeDir, '/r/dsh-desktop')
+})
+
+await test('devRootDir 落在缓存目录里，并跟随 XDG 与沙箱', () => {
+  assert.equal(resolvePaths({ HOME: '/h' }).devRootDir, '/h/.cache/dsh-desktop-dev')
+  assert.equal(resolvePaths({ HOME: '/h', XDG_CACHE_HOME: '/c' }).devRootDir, '/c/dsh-desktop-dev')
+
+  const sandboxed = resolvePaths({ HOME: '/h', XDG_CACHE_HOME: '/c', DSH_DESKTOP_ROOT: '/sandbox' })
+  assert.equal(sandboxed.devRootDir, '/sandbox/home/.cache/dsh-desktop-dev')
+  assert.equal(sandboxed.cacheHome, '/sandbox/home/.cache')
 })
 
 // ---------------------------------------------------------------------------
@@ -2023,6 +2171,38 @@ await linuxOnly('isDshWebProcess 认得出 dsh web 命令行', async () => {
     const verdict = isDshWebProcess(child.pid)
     assert.equal(verdict.ok, true, `应识别为 dsh web，实际：${verdict.reason}`)
     assert.match(verdict.command, /dsh web/)
+  } finally {
+    child.kill('SIGKILL')
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await linuxOnly('isDshWebProcess 也认 --profile 写法（0.5.0 起拉起命令的统一形式）', async () => {
+  const dir = makeSandbox('dshprofile')
+  // 0.5.0 起启动器和 `dsh-desktop start` 都用 `--profile <名字>`，argv 里**没有**
+  // `web` 这个词。只认子命令的话，dsh-desktop stop 会拒绝停自己刚拉起的服务。
+  const fake = path.join(dir, 'dsh')
+  fs.writeFileSync(fake, 'setTimeout(() => {}, 20000)\n')
+  const child = spawn(process.execPath, [fake, '--profile', 'web-dev', '--no-open'], { stdio: 'ignore' })
+  try {
+    await new Promise((r) => setTimeout(r, 400))
+    const verdict = isDshWebProcess(child.pid)
+    assert.equal(verdict.ok, true, `应识别为 dsh web，实际：${verdict.reason}`)
+  } finally {
+    child.kill('SIGKILL')
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await linuxOnly('isDshWebProcess 不接受 --profile 后面跟的是另一个选项', async () => {
+  const dir = makeSandbox('dshprofilebad')
+  const fake = path.join(dir, 'dsh')
+  fs.writeFileSync(fake, 'setTimeout(() => {}, 20000)\n')
+  const child = spawn(process.execPath, [fake, '--profile', '--no-open'], { stdio: 'ignore' })
+  try {
+    await new Promise((r) => setTimeout(r, 400))
+    const verdict = isDshWebProcess(child.pid)
+    assert.equal(verdict.ok, false, '--profile 后面没有值，不该被当成 web 进程')
   } finally {
     child.kill('SIGKILL')
     fs.rmSync(dir, { recursive: true, force: true })

@@ -57,10 +57,20 @@ export function escapeExecArg(value) {
  * @param {string} options.appId Wayland app_id（写入 StartupWMClass）。
  * @param {string} options.iconName 图标名。
  * @param {string} [options.terminalCommand] 非空则附带「以终端界面运行」动作。
+ * @param {{ profile: string, port: number, root: string } | null} [options.devAction]
+ *        非空则附带「以开发配置运行」动作。三项都会作为环境变量传给启动器。
  * @param {string} [options.version] 生成者版本，写进注释便于排查。
  * @returns {string}
  */
-export function renderDesktopEntry({ config, launcherPath, appId, iconName, terminalCommand, version = '0.0.0' }) {
+export function renderDesktopEntry({
+  config,
+  launcherPath,
+  appId,
+  iconName,
+  terminalCommand,
+  devAction = null,
+  version = '0.0.0',
+}) {
   const lines = []
   lines.push('# 由 dsh-linux-desktop 生成，请勿手工编辑 ——')
   lines.push(`# 版本 ${version}；重新生成请执行：dsh-desktop install --force`)
@@ -85,13 +95,37 @@ export function renderDesktopEntry({ config, launcherPath, appId, iconName, term
   lines.push(`StartupWMClass=${appId}`)
   lines.push('Keywords=dsh;deepseek;harness;agent;ai;coding;深度求索;智能体;')
 
+  const actions = []
+  if (terminalCommand) actions.push('TUI')
+  if (devAction) actions.push('Dev')
+  if (actions.length > 0) lines.push(`Actions=${actions.join(';')};`)
+
   if (terminalCommand) {
-    lines.push('Actions=TUI;')
     lines.push('')
     lines.push('[Desktop Action TUI]')
     lines.push('Name=Open in Terminal (dsh-tui)')
     lines.push('Name[zh_CN]=以终端界面运行 (dsh-tui)')
     lines.push(`Exec=${terminalCommand}`)
+  }
+
+  if (devAction) {
+    // 用 `env` 而不是 shell —— FreeDesktop 的 `Exec=` 不经过 shell，没有 `VAR=x cmd`
+    // 这种语法。`env` 本身在 PATH 上，是规范允许的写法。
+    //
+    // 三个变量缺一不可：
+    //   PROFILE  切到开发那套 profile（插件来自源码仓库）
+    //   PORT     换端口，否则会命中已在跑的日常那套并被直接复用
+    //   ROOT     沙箱，挡住开发版的 autoInstall 覆盖真实的启动器与桌面入口
+    const envArgs = [
+      `DSH_DESKTOP_PROFILE=${devAction.profile}`,
+      `DSH_DESKTOP_PORT=${String(devAction.port)}`,
+      `DSH_DESKTOP_ROOT=${devAction.root}`,
+    ]
+    lines.push('')
+    lines.push('[Desktop Action Dev]')
+    lines.push(`Name=Run with development profile (${devAction.profile})`)
+    lines.push(`Name[zh_CN]=以开发配置运行 (${devAction.profile})`)
+    lines.push(`Exec=env ${envArgs.map(escapeExecArg).join(' ')} ${escapeExecArg(launcherPath)}`)
   }
 
   return `${lines.join('\n')}\n`
