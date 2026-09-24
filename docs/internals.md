@@ -182,6 +182,21 @@ GNOME 既没有窗口规则配置文件，也没有对应的 dconf 键 —— �
 
 ---
 
+### 4.5 客户端插件行：读服务必须用 `ctx.get()`，且不能乱写 `inject`
+
+浏览器半侧那张设置卡片要拿宿主的设置命名空间。这个服务的名字**变过**：DSH 0.1.7 之前叫 `settingsScope`，之后叫 `configForms`。
+
+两条硬约束，缺一个就会把整个 web 界面搞挂：
+
+1. **不能把它写回 `inject`。** 声明一个宿主没有的服务，Cordis 会让这一行永远停在 pending —— 症状是启动时报 `Failed to load plugins` / `web boot: N entries did not activate`，整个 `dsh web` 起不来。2026-09-24 那次 DSH 更新后踩的正是这个。
+2. **也不能写成 `ctx.settingsScope?.bind?.(…)`。** Cordis 的上下文代理在读取**未声明**的服务属性时是直接抛异常的（`lib/index.js` 的 get trap：`cannot get property "<名字>" without inject`），可选链根本没机会生效。
+
+所以正确写法是 `ctx.get('settingsScope')?.bind?.(…) ?? ctx.get('configForms')?.get(…)`：`ctx.get()` 对不存在的服务返回 `undefined` 而不是抛异常，`??` 再兜到新名字上。最后再加一道 `if (!scope) return` —— 客户端插件行抛异常会连累整个界面，而这张卡片只是锦上添花。
+
+`test/smoke.mjs` 里有一节专门钉这三件事：`inject` 里不许出现 `settingsScope`、新名字下卡片照常注册、两个服务都没有时不抛异常。做法是把 `src/client.js` 当浏览器 bundle 真跑一遍（假 `window.__ModuleLoader__` + 假 `require`），因此这个文件第一次有了测试。
+
+---
+
 ## 5. 其它踩过的坑
 
 - **`exec` 的重定向陷阱**：bash 里写 `exec 9>lockfile 2>/dev/null`，`exec` 后面**没有命令**时，所有重定向会永久作用于当前 shell —— 那个 `2>/dev/null` 会把脚本后续所有调试日志丢进黑洞。启动器里因此写成 `if exec 9>"$file"; then …`。

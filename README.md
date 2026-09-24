@@ -4,7 +4,7 @@
 
 这是一个 DSH bundle。它复用系统已有的 Chromium 系浏览器，用标准 XDG 桌面入口把 `dsh web` 接入桌面环境，并且不修改 `dsh web` 自身的行为。
 
-**分发状态**：可直接从 GitHub 安装，尚未发布到 npm。
+**分发状态**：已发布到 npm，也可以直接从 GitHub 安装。
 
 ---
 
@@ -32,15 +32,22 @@ Firefox 不受支持：Firefox 已移除 SSB（Site Specific Browser），无法
 ## 安装
 
 ```bash
-dsh plugin --profile web add github:ffyfox/dsh-linux-desktop
+dsh plugin --profile web add dsh-linux-desktop
 ```
 
 安装后重启一次 `dsh web`。
 
-想锁定版本就在后面加 `#<tag>`：
+想跟着 `main` 走就换成从 GitHub 装：
 
 ```bash
-dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.1
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop
+```
+
+两种来源都能锁定版本：
+
+```bash
+dsh plugin --profile web add dsh-linux-desktop@0.4.2
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.2
 ```
 
 改代码时改用本地检出：
@@ -49,9 +56,9 @@ dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.1
 dsh plugin --profile web add /path/to/dsh-linux-desktop
 ```
 
-> **`github:` 这条实测过**：在隔离的 `DSH_HOME` 里跑通，装完 `dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`，不需要手工编辑 `package.json`。
+> **三种来源都实测过**，各自在隔离的 `DSH_HOME` 里跑通，装完 `dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`，不需要手工编辑 `package.json`。按包名走 registry 最快；从 GitHub 装要克隆整个仓库，慢一个数量级。
 >
-> 尚未发布到 npm，因此 `add dsh-linux-desktop`（按包名）暂不可用。本插件是纯 ESM JavaScript，没有构建步骤，所以从任何来源安装都不需要给 pnpm 授予 `allowBuilds` 权限。
+> 本插件是纯 ESM JavaScript，没有构建步骤，所以从任何来源安装都不需要给 pnpm 授予 `allowBuilds` 权限。
 
 ## 使用
 
@@ -225,6 +232,7 @@ dsh plugin --profile web exec dsh-desktop uninstall
 
 | 维度 | 状态 |
 |---|---|
+| DSH | **已验证**：0.1.7-rc.1（客户端设置服务 `configForms`）。**向后兼容**：0.1.7 之前用 `settingsScope` 的宿主同样可用 |
 | 桌面环境 | **已验证**：KDE Plasma 6。**部分验证**：Hyprland 0.56.2（app_id 推导与窗口尺寸规则已实测，见「Hyprland 与窗口尺寸」；完整桌面会话下的桌面入口未验证）。**部分验证**：GNOME / Mutter 50.5（窗口尺寸行为已实测，见「GNOME 与窗口尺寸」；完整桌面会话下的桌面入口未验证）。**预期可用但未验证**：Sway 等其它 wlroots 系、Xfce、MATE、Cinnamon、i3 —— 窗口与桌面入口均为标准 XDG，窗口规则只在 KDE 与 Hyprland 下写入 |
 | 显示协议 | **已验证**：Wayland。**预期可用但未验证**：X11 |
 | 浏览器 | **已验证**：Google Chrome。**预期可用但未验证**：Chromium、Brave、Edge、Vivaldi、Opera |
@@ -254,6 +262,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 | 右键「以终端界面运行 (dsh-tui)」打开的是一个普通 bash，并提示 `Could not find 'dsh'` | 入口里写的是裸 `dsh`，而桌面会话的 `PATH` 不含用户级 bin。执行 `dsh-desktop install --force` 刷新入口，动作会改用 `dsh` 的绝对路径。 |
 | 服务是刚由启动器拉起的，窗口要等十几秒才出现 | 有意的：自启路径会先等 `dsh web:` 落定行，再等一次会话 API 探测成功，两道都过才开窗。服务端插件集越大，这段等待越长；窗口出现时后端一定是可用的。 |
 | 关闭窗口后服务仍在运行 | 当前为 `shared` 模式，或服务由别处启动，本插件不接管。改用 `dedicated` 并从桌面图标启动服务。 |
+| 启动时报 `dsh-linux-desktop: pending (waiting for service: settingsScope)`，`dsh web` 起不来 | DSH 0.1.7 起把设置服务从 `settingsScope` 改名成了 `configForms`，0.4.1 及更早的版本会一直等那个不存在的服务。升级到 0.4.2 及以上。 |
 | 设置页「插件配置」里没有「桌面集成」卡片 | 宿主没注册命名空间。确认 `dsh web` 已重启过，且 `@deepseek-ai/schemastery` 可被加载；本地检出方式安装时见上文「设置页卡片与 config.json 的关系」。 |
 
 ## 开发
@@ -261,7 +270,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 在仓库根目录执行：
 
 ```bash
-node test/smoke.mjs                                   # 冒烟测试，用例共 117 项，零依赖
+node test/smoke.mjs                                   # 冒烟测试，用例共 121 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
 node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录

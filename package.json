@@ -1,6 +1,6 @@
 {
   "name": "dsh-linux-desktop",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "DeepSeek Harness 的 Linux 原生桌面集成：XDG 桌面入口、纯净无边框独立窗口，以及由自己启动的服务随窗口关闭而停止的生命周期管理。",
   "type": "module",
   "license": "MIT",
@@ -74,5 +74,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ffyfox/dsh-linux-desktop.git"
+  },
+  "author": "ffyfox",
+  "homepage": "https://github.com/ffyfox/dsh-linux-desktop#readme",
+  "bugs": {
+    "url": "https://github.com/ffyfox/dsh-linux-desktop/issues"
   }
 }

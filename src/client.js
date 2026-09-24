@@ -828,7 +828,7 @@ window.__ModuleLoader__.load({
     // -----------------------------------------------------------------------
 
     /** 需要的浏览器侧服务。 */
-    const inject = ['slots', 'locale', 'settingsScope']
+    const inject = ['slots', 'locale']
 
     /**
      * @param {object} ctx 浏览器插件上下文。
@@ -837,7 +837,23 @@ window.__ModuleLoader__.load({
       const t = ctx.locale.bind(LOCALE_NS)
       ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-linux-desktop: card dictionaries')
 
-      const scope = ctx.settingsScope.bind({ namespace: NAMESPACE })
+      // 设置命名空间的服务名在 DSH 0.1.7 从 `settingsScope` 改成了 `configForms`，
+      // 两个名字都要认。
+      //
+      // 必须用 `ctx.get(...)` 而不是 `ctx.settingsScope?.bind?.(...)`：Cordis 的上下文
+      // 代理在读取**未声明**的服务属性时会直接抛异常（cordis `lib/index.js` 的 get trap
+      // 抛 `cannot get property "<name>" without inject`），可选链根本来不及生效。
+      //
+      // 也不能把它写回 `inject` —— 那样在缺少该服务的宿主上这一行会卡成 pending，
+      // 整个 web 界面起不来（2026-09-24 DSH 更新后就是这个症状：settingsScope 改名，
+      // 插件行等待一个永远不会出现的服务）。
+      const scope =
+        ctx.get('settingsScope')?.bind?.({ namespace: NAMESPACE }) ?? ctx.get('configForms')?.get(NAMESPACE)
+
+      // 宿主没装设置页（两个服务都没有）时不注册卡片，但**绝不向外抛**：
+      // 客户端插件行抛异常会连累整个 web 界面，而这张卡片只是锦上添花。
+      if (!scope) return
+
       const form = new CardForm(scope)
       const actions = form.actions()
       const store = form.bind(() => ({

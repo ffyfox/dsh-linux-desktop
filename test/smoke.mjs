@@ -1898,6 +1898,109 @@ await linuxOnly('卸载时清理运行时状态', async () => {
 })
 
 // ---------------------------------------------------------------------------
+section('客户端插件行：设置卡片服务改名后的兼容性')
+// ---------------------------------------------------------------------------
+
+/**
+ * 把 `src/client.js` 当浏览器 bundle 真跑一遍，取出 factory 的产物。
+ *
+ * 它是 `window.__ModuleLoader__.load({ id, factory })` 格式，所以给一个假的
+ * `window` 和一个假的 `require`，就能在不启动浏览器的情况下拿到 `inject` / `apply`。
+ */
+function loadClientBundle() {
+  const source = fs.readFileSync(path.join(ROOT, 'src/client.js'), 'utf8')
+  let entry = null
+  new Function('window', source)({
+    __ModuleLoader__: {
+      load: (value) => {
+        entry = value
+      },
+    },
+  })
+  assert.ok(entry, 'client.js 应当调用 window.__ModuleLoader__.load')
+  assert.equal(entry.id, 'dsh-linux-desktop', 'id 必须逐字等于包名，否则加载器会拒绝注册')
+
+  const requireStub = (name) => {
+    if (name === 'react') return {}
+    if (name === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return {}
+    if (name === '@deepseek-ai/dsh-client-store') {
+      return { createSnapshotStore: () => ({ set() {}, get() {}, subscribe: () => () => {} }) }
+    }
+    throw new Error(`client.js require 了未预料的模块：${name}`)
+  }
+  return entry.factory(requireStub)
+}
+
+/** 设置页交给卡片的 scope。CardForm 只用到 subscribe 与 getSnapshot。 */
+function fakeSettingsScope() {
+  return {
+    subscribe: () => () => {},
+    getSnapshot: () => ({ value: {}, user: undefined, status: 'ready', writable: true }),
+  }
+}
+
+/** 造一个刚好够客户端插件行用的上下文。 */
+function fakeClientCtx(services = {}) {
+  const injected = []
+  return {
+    injected,
+    locale: { bind: () => (key) => key, register: () => () => {} },
+    effect: (fn) => fn(),
+    get: (name) => services[name],
+    slots: {
+      inject: (name, fn) => injected.push({ name, fn }),
+      register: (spec) => spec,
+    },
+  }
+}
+
+await test('客户端行不声明 settingsScope —— 声明了就会在缺该服务的宿主上卡成 pending', () => {
+  const mod = loadClientBundle()
+  assert.deepEqual(mod.inject, ['slots', 'locale'], 'inject 里只应留下一定存在的服务')
+})
+
+await test('DSH 0.1.7：服务改名成 configForms 后，卡片照常注册', () => {
+  const mod = loadClientBundle()
+  const ctx = fakeClientCtx({
+    configForms: { get: (ns) => (ns === 'linux-desktop' ? fakeSettingsScope() : undefined) },
+  })
+  mod.apply(ctx)
+
+  assert.equal(ctx.injected.length, 1, '应当注册一张设置卡片')
+  assert.equal(ctx.injected[0].name, 'settings.plugin.item')
+
+  const spec = ctx.injected[0].fn()
+  assert.equal(spec.key, 'linux-desktop', 'key 必须等于宿主注册的 settings 命名空间，否则卡片不会被派发')
+  assert.equal(spec.locale, 'dsh-linux-desktop', '文案命名空间用的是包名，别和设置命名空间混了')
+  assert.ok(spec.inject().hooks.linuxDesktopCard, '卡片应当拿到 store')
+})
+
+await test('老 DSH：settingsScope 还在时仍走老路径（向后兼容）', () => {
+  const mod = loadClientBundle()
+  let bound = null
+  const ctx = fakeClientCtx({
+    settingsScope: {
+      bind: ({ namespace }) => {
+        bound = namespace
+        return fakeSettingsScope()
+      },
+    },
+  })
+  mod.apply(ctx)
+
+  assert.equal(bound, 'linux-desktop', '应当按命名空间绑定')
+  assert.equal(ctx.injected.length, 1)
+})
+
+await test('两个服务都没有时不抛异常、也不注册卡片（客户端行抛异常会连累整个 web 界面）', () => {
+  const mod = loadClientBundle()
+  const ctx = fakeClientCtx()
+  assert.doesNotThrow(() => mod.apply(ctx), '缺少设置页服务时必须安静跳过')
+  assert.equal(ctx.injected.length, 0)
+})
+
+// ---------------------------------------------------------------------------
 section('服务查找与启停（server.js）')
 // ---------------------------------------------------------------------------
 

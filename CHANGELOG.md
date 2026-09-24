@@ -3,6 +3,45 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.4.2] - 2026-09-25
+
+修掉 DSH 0.1.7 一次服务改名导致插件行卡死的问题，并发布到 npm。
+
+### 修正
+
+- **DSH 0.1.7 起 `settingsScope` 服务改名为 `configForms`，旧代码会让插件行永远停在 pending，整个 `dsh web` 起不来。** 症状是启动时报：
+
+  ```
+  Failed to load plugins
+  web boot: 2 entries did not activate
+  dsh-linux-desktop: pending (waiting for service: settingsScope)
+  ```
+
+  两处改动：
+
+  1. 客户端插件行的 `inject` 不再声明 `settingsScope` —— 声明一个不存在的服务，这一行就会一直等它。
+  2. 改成 `ctx.get('settingsScope')?.bind?.(…) ?? ctx.get('configForms')?.get(…)`，新旧宿主都能工作。
+
+  必须用 `ctx.get(...)` 而不是 `ctx.settingsScope?.bind?.(...)`：Cordis 的上下文代理在读取**未声明**的服务属性时直接抛异常（`cannot get property "<名字>" without inject`），可选链根本来不及生效。
+
+  另补一道兜底：两个服务都没有时安静跳过、不注册卡片，而不是抛出去 —— 客户端插件行抛异常会连累整个 web 界面。
+
+- **0.4.1 发布出去的那份 README 里有两句话不再成立**：「尚未发布到 npm」和「`add dsh-linux-desktop`（按包名）暂不可用」。npm 页面渲染的就是包里的 README，所以这两句只能靠一个新版本才能修掉 —— 这正是「发版前先改文档」的原因。
+
+### 新增
+
+- **npm 发布**：`dsh plugin --profile web add dsh-linux-desktop`。这是最省事的一条安装路径 —— 不克隆仓库，装完即用。已在隔离的 `DSH_HOME` 中实测通过，`dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`。安装一节现在按 **npm → GitHub → 本地检出** 排列，三种来源都实测过。
+- `package.json` 补上 `author` / `homepage` / `bugs` 三个字段 —— npm 页面上原本这几项都是空的。
+- **发布前校验新增第 8 项：会进包的文件有未提交改动时拒绝发布。** `npm publish` 打包的是**工作区**而不是某个提交 —— 0.4.1 就是这么把一处未提交的本地改动带进包的（发布后逐文件比对才发现包里 `src/client.js` 比 tag 多一个 hunk）。
+- 冒烟测试新增 4 项，覆盖上面那条服务改名兼容性；用例总数 117 → 121。新增的用例把 `src/client.js` 当浏览器 bundle 真跑一遍（假 `window` + 假 `require`），因此客户端插件行第一次有了测试。
+
+### 实测记录
+
+- 三种来源各自跑通：按包名（走 registry，秒级）、`github:ffyfox/dsh-linux-desktop`（要克隆整个仓库，分钟级）、本地 `link:`。
+- 发布过程本身踩了两个坑，记在这里以免下次再踩：
+  - `NODE_OPTIONS=--use-env-proxy`（Node 26 的内建代理）会让 npm 的 fetch 直接失败 —— 表现为 `npm login` 卡在 `web login before first POST` 一动不动。
+  - 本机 `~/.npmrc` 的默认 registry 是 `registry.npmmirror.com`（只读镜像），发布必须显式加 `--registry=https://registry.npmjs.org`。
+
 ## [0.4.1] - 2026-09-23
 
 仓库转为公开，顺带修正文档里一个早就过期的数字。

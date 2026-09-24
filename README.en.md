@@ -4,7 +4,7 @@
 
 This is a DSH bundle. It reuses the Chromium-family browser already installed on your system, wires `dsh web` into the desktop through standard XDG desktop entries, and does not change the behaviour of `dsh web` itself.
 
-**Distribution status**: installable straight from GitHub; not yet published to npm.
+**Distribution status**: published to npm; also installable straight from GitHub.
 
 ---
 
@@ -32,15 +32,22 @@ Firefox is not supported: Mozilla removed SSB (Site Specific Browser), so Firefo
 ## Install
 
 ```bash
-dsh plugin --profile web add github:ffyfox/dsh-linux-desktop
+dsh plugin --profile web add dsh-linux-desktop
 ```
 
 Restart `dsh web` once after installing.
 
-To pin a version, append `#<tag>`:
+To track `main` instead, install from GitHub:
 
 ```bash
-dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.1
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop
+```
+
+Either source can be pinned to a version:
+
+```bash
+dsh plugin --profile web add dsh-linux-desktop@0.4.2
+dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.2
 ```
 
 For working on the code, use a local checkout instead:
@@ -49,9 +56,9 @@ For working on the code, use a local checkout instead:
 dsh plugin --profile web add /path/to/dsh-linux-desktop
 ```
 
-> **The `github:` form was verified**: it was run in an isolated `DSH_HOME`, and `dsh` registers the row in the profile's `dsh.profile.bundles` automatically — no manual `package.json` edit needed.
+> **All three sources were verified** in an isolated `DSH_HOME`, and `dsh` registers the row in the profile's `dsh.profile.bundles` automatically — no manual `package.json` edit needed. Installing by package name from the registry is by far the fastest; the GitHub form clones the whole repository.
 >
-> The package is not published to npm yet, so `add dsh-linux-desktop` (by package name) is not available. This plugin is plain ESM JavaScript with no build step, so installing it from any source does not require granting pnpm an `allowBuilds` permission.
+> This plugin is plain ESM JavaScript with no build step, so installing it from any source does not require granting pnpm an `allowBuilds` permission.
 
 ## Usage
 
@@ -226,6 +233,7 @@ Keeps `~/.config/dsh-desktop/`, which holds the configuration and backups.
 
 | Dimension | Status |
 |---|---|
+| DSH | **Verified**: 0.1.7-rc.1 (client settings service `configForms`). **Backward compatible**: hosts older than 0.1.7 that still expose `settingsScope` also work |
 | Desktop environment | **Verified**: KDE Plasma 6. **Partially verified**: Hyprland 0.56.2 (app_id derivation and the window size rule are measured — see "Hyprland and window size"; the desktop entry under a full session is not verified). **Partially verified**: GNOME / Mutter 50.5 (window sizing behaviour is measured — see "GNOME and window size"; the desktop entry under a full session is not verified). **Expected to work, not verified**: Sway and other wlroots compositors, Xfce, MATE, Cinnamon, i3 — the window and desktop entry are standard XDG, and window rules are only written on KDE and Hyprland |
 | Display protocol | **Verified**: Wayland. **Expected to work, not verified**: X11 |
 | Browser | **Verified**: Google Chrome. **Expected to work, not verified**: Chromium, Brave, Edge, Vivaldi, Opera |
@@ -255,6 +263,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 | Right-click "Open in Terminal (dsh-tui)" drops into a plain bash and prints `Could not find 'dsh'` | The entry used a bare `dsh`, and the desktop session `PATH` has no user-level bin directories. Run `dsh-desktop install --force` to regenerate the entry; the action now uses the absolute path to `dsh`. |
 | The service was just auto-started and the window takes tens of seconds to appear | Deliberate: the auto-start path waits for the `dsh web:` settled line and then for a session-API probe to succeed before opening the window. The larger the server's plugin set, the longer that wait; when the window does appear the backend is guaranteed ready. |
 | The server is still running after the window closes | You are in `shared` mode, or the service was started elsewhere and is deliberately not taken over. Use `dedicated` and start the service from the desktop icon. |
+| Boot fails with `dsh-linux-desktop: pending (waiting for service: settingsScope)` and `dsh web` will not start | DSH 0.1.7 renamed the settings service from `settingsScope` to `configForms`, and 0.4.1 and earlier wait forever for the old name. Upgrade to 0.4.2 or later. |
 | No "Desktop integration" card under Plugin configuration | The Host did not register the namespace. Confirm `dsh web` has been restarted and that `@deepseek-ai/schemastery` can be loaded; for a local-checkout install see "The settings card and config.json" above. |
 
 ## Development
@@ -262,7 +271,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 Run these from the repository root:
 
 ```bash
-node test/smoke.mjs                                   # smoke tests, 117 checks total, zero dependencies
+node test/smoke.mjs                                   # smoke tests, 121 checks total, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
 node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touches nothing real

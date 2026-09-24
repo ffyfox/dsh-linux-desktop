@@ -14,6 +14,7 @@
  *   5. 冒烟测试全绿
  *   6. 打包产物里包含全部运行时文件
  *   7. README 卫生（没有残留占位符；指向 docs/ 的链接是绝对 URL；声明的用例数量与实际一致）
+ *   8. 工作区干净（会进包的文件都已提交 —— npm 打包的是工作区，不是某个提交）
  */
 
 import { execFileSync } from 'node:child_process'
@@ -201,6 +202,44 @@ for (const file of ['README.md', 'README.en.md']) {
   } else {
     ok(`${file} 的用例数量与实际一致（${claimedCount} 项）`)
   }
+}
+
+// ---- 8. 工作区干净 --------------------------------------------------------
+// `npm publish` 打包的是**工作区**，不是某个提交 —— 任何未提交的改动都会静悄悄
+// 进包，而发布不可逆（同名同版本不能重发）。2026-09-25 真踩过一次：发布出去的
+// 0.4.1 里 src/client.js 比 tag 多了一处未提交的本地改动，事后逐文件比对才发现。
+//
+// 只盯会进包的那些路径。未跟踪文件也算 —— 它们同样会被 `files` 白名单收进去。
+const SHIPPED_PATHS = [
+  'src',
+  'bin',
+  'cordis.patch.yml',
+  'package.json',
+  'README.md',
+  'README.en.md',
+  'CHANGELOG.md',
+  'LICENSE',
+]
+
+try {
+  const dirty = execFileSync('git', ['status', '--porcelain', '--', ...SHIPPED_PATHS], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  }).trim()
+  if (dirty.length === 0) {
+    ok('工作区干净（会进包的文件都已提交）')
+  } else {
+    const lines = dirty.split('\n')
+    const shown = lines.slice(0, 8).join('\n      ')
+    fail(
+      `有未提交改动会被一起打进包（${lines.length} 处）：\n      ${shown}`,
+      'npm publish 打包的是工作区而不是某个提交；先提交或撤销，再发布',
+    )
+  }
+} catch (error) {
+  // 不是 git 仓库（例如从 tarball 里发布）时不阻塞，但要说清楚没检查。
+  notes.push(`未检查工作区是否干净（git 不可用或不是 git 仓库：${error.code ?? error.message}）`)
 }
 
 // ---- 结论 ----------------------------------------------------------------
