@@ -14,14 +14,14 @@
 ### 新增
 
 - **`npm run release`** —— 一条命令跑完校验（`--release`）→ 从 tag 产出制品 → 打印可直接复制的发布命令。它**故意不发布**：npm 要求浏览器确认，而且「要不要发」是判断，不是机械步骤。
-- **`npm run verify:published`** —— 下载 npm 上的包，先与 registry 记的 `dist.shasum` 比 sha1，再与 tag 逐文件比对。这是唯一能真正坐实「发布 == tag」的一步，0.4.1 那次正是靠事后做这件事才发现的。
+- **`npm run verify:published`** —— 下载 npm 上的包，先确认 registry 上真有这个版本（不存在就当场报错，不去等五分钟），再与 registry 记的 `dist.shasum` 比 sha1，最后与 tag 逐文件比对。这是唯一能真正坐实「发布 == tag」的一步，0.4.1 那次正是靠事后做这件事才发现的。加 `-- --version <版本>` 可以核对任意已发布版本。
 - **`.githooks/pre-commit` 与 `npm run hooks:install`** —— 提交前自动跑 `check:fast`（约 5 秒）。README 里的用例数量、隐私指纹、测试是否全绿，都是「改完很容易忘、忘了要到发布那一刻才暴露」的东西。
 - 校验新增两个模式：`--fast`（跳过「打包产物完整性」，给钩子用）、`--release`（tag 检查升级为致命项）。
 - `tagProblem` 从 `verifyReleaseState` 里抽出来，两个调用方各自决定严重程度。
 
 ### 其它
 
-- 新增用例 5 项（152 → 157）。
+- 新增用例 6 项（152 → 158）。
 
 ## [0.5.0] - 2026-09-25
 

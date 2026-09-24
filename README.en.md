@@ -305,7 +305,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 Run these from the repository root:
 
 ```bash
-node test/smoke.mjs                                   # smoke tests, 157 checks total, zero dependencies
+node test/smoke.mjs                                   # smoke tests, 158 checks total, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
 node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touches nothing real
@@ -342,6 +342,7 @@ After publishing, **verify** — this is the step that actually settles "publish
 
 ```bash
 npm run verify:published             # download the package from npm and diff it against the tag
+npm run verify:published -- --version 0.5.0   # or verify any already-published version
 ```
 
 #### The two validation modes

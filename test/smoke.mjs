@@ -51,7 +51,7 @@ import { findListeningPid, isDshWebProcess, resolveServerTarget, stopServerProce
 import { packFromTag, tagForVersion, tagProblem, verifyReleaseState } from '../scripts/pack-from-tag.mjs'
 import { shippedPaths } from '../scripts/shipped-paths.mjs'
 import { findPackageDependency } from '../scripts/snapshot.mjs'
-import { diffTarballAgainstTag, registryTarballUrl } from '../scripts/verify-published.mjs'
+import { diffTarballAgainstTag, parseVerifyArgs, registryTarballUrl } from '../scripts/verify-published.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
@@ -2129,6 +2129,15 @@ await test('tagProblem 只判 tag，不掺脏树', () => {
   // 关键区别：这条检查**不**因为脏树而变化 —— 脏树归 verifyReleaseState 管，
   // prepublish-check 的默认模式正是靠这一点才能只提示 tag、不重复报脏树。
   assert.equal(tagProblem({ version: '1.2.3', describedTag: 'v1.2.3', porcelain: ' M x' }), null)
+})
+
+await test('parseVerifyArgs 解析 --version，拒绝不认识的参数', () => {
+  assert.deepEqual(parseVerifyArgs([]), { version: undefined })
+  assert.deepEqual(parseVerifyArgs(['--version', '1.2.3']), { version: '1.2.3' })
+  assert.deepEqual(parseVerifyArgs(['--version=1.2.3']), { version: '1.2.3' })
+  // 缺值 / 拼错参数都要当场报错，而不是当成默认值跑下去 —— 那会去核对错的版本。
+  assert.throws(() => parseVerifyArgs(['--version']), /要跟一个版本号/)
+  assert.throws(() => parseVerifyArgs(['--nope']), /不认识的参数/)
 })
 
 await test('registryTarballUrl 拼出 npm 的规范 tarball 地址', () => {

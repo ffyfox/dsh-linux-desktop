@@ -304,7 +304,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 在仓库根目录执行：
 
 ```bash
-node test/smoke.mjs                                   # 冒烟测试，用例共 157 项，零依赖
+node test/smoke.mjs                                   # 冒烟测试，用例共 158 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
 node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录
@@ -341,6 +341,7 @@ npm publish <上一步打印的 tgz 路径>   # 发的是这个 tgz，不是工�
 
 ```bash
 npm run verify:published             # 下载 npm 上的包，与 tag 逐文件比对
+npm run verify:published -- --version 0.5.0   # 也可以核对任意已发布版本
 ```
 
 #### 校验的两个模式

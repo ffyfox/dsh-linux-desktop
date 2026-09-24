@@ -11,7 +11,10 @@
  *   2. 下载 tarball，算它的 sha1，与上面比 —— 这一步能发现「传输出错 / 拿错文件」；
  *   3. 解包，与 `git show <tag>:<路径>` 逐字节比 —— 这一步才能发现「发布内容 != tag」。
  *
- * 用法：npm run verify:published
+ * 用法：npm run verify:published [-- --version <版本>]
+ *
+ * 不带 `--version` 时核对 package.json 里的当前版本。带上的话可以核对任意已发布
+ * 版本 —— 补做历史核对、或者刚 bump 完还想确认上一个版本没发错，都用得上。
  */
 
 import { execFileSync } from 'node:child_process'
@@ -26,6 +29,28 @@ import { REPO_ROOT } from './shipped-paths.mjs'
 
 const ROOT = REPO_ROOT
 const REGISTRY = 'https://registry.npmjs.org'
+
+/**
+ * 解析 `[--version <版本>]`。不认识参数直接报错，免得手滑写错却当成默认值跑了。
+ * @returns {{ version?: string }}
+ */
+export function parseVerifyArgs(argv) {
+  let version
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === '--version') {
+      const value = argv[index + 1]
+      if (!value) throw new Error('--version 后面要跟一个版本号')
+      version = value
+      index += 1
+    } else if (arg.startsWith('--version=')) {
+      version = arg.slice('--version='.length)
+    } else {
+      throw new Error(`不认识的参数：${arg}`)
+    }
+  }
+  return { version }
+}
 
 /** tarball 的规范地址。npm 的 tarball 路径规则是固定的，不用去 packument 里翻。 */
 export function registryTarballUrl(packageName, version, registry = REGISTRY) {
@@ -57,14 +82,18 @@ async function download(url, destination) {
   }
 }
 
-/** 取 packument 里该版本的 dist.shasum（npm 自己算的 sha1）。拿不到返回 null。 */
-async function registryShasum(packageName, version) {
-  const url = `${REGISTRY}/${packageName}`
+/**
+ * 取 packument（npm 的包元数据）。拿不到返回 null。
+ *
+ * 先读它有两个用处：一是拿到 `dist.shasum` 做比对，二是**先确认这个版本存在** ——
+ * 否则一个根本不存在的版本号会让下面的下载重试白等五分钟（tarball 的 404 与
+ * 「刚发布还没就绪」的 404 长得一模一样，只能靠元数据区分）。
+ */
+async function registryPackument(packageName) {
   const tmp = path.join(os.tmpdir(), `dsh-packument-${process.pid}.json`)
   try {
-    if (!(await download(url, tmp))) return null
-    const packument = JSON.parse(fs.readFileSync(tmp, 'utf8'))
-    return packument?.versions?.[version]?.dist?.shasum ?? null
+    if (!(await download(`${REGISTRY}/${packageName}`, tmp))) return null
+    return JSON.parse(fs.readFileSync(tmp, 'utf8'))
   } catch {
     return null
   } finally {
@@ -119,10 +148,24 @@ export function diffTarballAgainstTag({ tgz, root, tag }) {
 }
 
 async function main() {
+  let requested
+  try {
+    requested = parseVerifyArgs(process.argv.slice(2))
+  } catch (error) {
+    process.stderr.write(`${error.message}\n用法：node scripts/verify-published.mjs [--version <版本>]\n`)
+    process.exitCode = 2
+    return
+  }
+
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
-  const { name, version } = pkg
+  const name = pkg.name
+  const version = requested.version ?? pkg.version
   const tag = tagForVersion(version)
   const url = registryTarballUrl(name, version)
+
+  if (requested.version && requested.version !== pkg.version) {
+    process.stdout.write(`\n\u001B[2m· 核对的是 --version 指定的 ${version}，不是 package.json 里的 ${pkg.version}\u001B[0m\n`)
+  }
 
   process.stdout.write(`\n\u001B[1m发布后核对\u001B[0m ${name}@${version} vs ${tag}\n`)
   process.stdout.write(`  ${url}\n\n`)
@@ -131,6 +174,20 @@ async function main() {
   const tgz = path.join(tmpDir, `${name}-${version}.tgz`)
 
   try {
+    // ---- 0. 先确认 registry 上真有这个版本。不存在就直接说清楚，别去等 tarball。
+    const packument = await registryPackument(name)
+    if (packument === null) {
+      process.stdout.write('  · registry 元数据读不到（网络或代理问题），跳过「版本是否存在」这一查\n')
+    } else if (!packument.versions?.[version]) {
+      const published = Object.keys(packument.versions ?? {}).join(', ') || '（无）'
+      process.stderr.write(
+        `\n✗ registry 上没有 ${name}@${version}。已发布的版本：${published}\n` +
+          `  latest 是 ${packument['dist-tags']?.latest ?? '(未知)'}\n\n`,
+      )
+      process.exitCode = 1
+      return
+    }
+
     // ---- 1. 下载。刚发布的包可能先 404 几分钟（npm 提示 "being processed"：
     //         元数据先上线、tarball 后到），所以这里要重试而不是一次就放弃。
     let downloaded = false
@@ -150,7 +207,7 @@ async function main() {
 
     // ---- 2. sha1：与 npm 自己记的 dist.shasum 比
     const actual = crypto.createHash('sha1').update(fs.readFileSync(tgz)).digest('hex')
-    const expected = await registryShasum(name, version)
+    const expected = packument?.versions?.[version]?.dist?.shasum ?? null
     if (expected === null) {
       process.stdout.write(`  · registry 里读不到 dist.shasum，跳过这一比（下载件 sha1 ${actual}）\n`)
     } else if (expected === actual) {
