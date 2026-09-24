@@ -3,6 +3,26 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.1] - 2026-09-25
+
+把发布流程里剩下的机械步骤也收进命令，并堵上一个发布校验的漏口。
+
+### 修正
+
+- **`prepublishOnly` 现在要求 tag 精确指向 HEAD。** 原先它只查「工作区是否干净」，拦不住「工作区干净、tag 却指向别的提交」—— 而那正是 0.4.1 事故的另一半。手动跑 `npm run check` 时仍只把 tag 当提示：平时 HEAD 上本来就没有 tag，那是正常开发状态，拦下来只会让人不再跑这个命令。
+
+### 新增
+
+- **`npm run release`** —— 一条命令跑完校验（`--release`）→ 从 tag 产出制品 → 打印可直接复制的发布命令。它**故意不发布**：npm 要求浏览器确认，而且「要不要发」是判断，不是机械步骤。
+- **`npm run verify:published`** —— 下载 npm 上的包，先与 registry 记的 `dist.shasum` 比 sha1，再与 tag 逐文件比对。这是唯一能真正坐实「发布 == tag」的一步，0.4.1 那次正是靠事后做这件事才发现的。
+- **`.githooks/pre-commit` 与 `npm run hooks:install`** —— 提交前自动跑 `check:fast`（约 5 秒）。README 里的用例数量、隐私指纹、测试是否全绿，都是「改完很容易忘、忘了要到发布那一刻才暴露」的东西。
+- 校验新增两个模式：`--fast`（跳过「打包产物完整性」，给钩子用）、`--release`（tag 检查升级为致命项）。
+- `tagProblem` 从 `verifyReleaseState` 里抽出来，两个调用方各自决定严重程度。
+
+### 其它
+
+- 新增用例 5 项（152 → 157）。
+
 ## [0.5.0] - 2026-09-25
 
 让「日常用的那套」和「开发用的那套」能彻底分家，并给发布加了一道隐私闸门。

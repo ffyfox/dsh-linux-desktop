@@ -48,9 +48,10 @@ import { clearRuntime, inspectRuntime, isProcessAlive, readRuntime, writeRuntime
 import { createSettingsSchema, SETTINGS_FIELDS, SETTINGS_NAMESPACE, settingsBase } from '../src/settings.js'
 import { findListeningPid, isDshWebProcess, resolveServerTarget, stopServerProcess } from '../src/server.js'
 // 发布脚本里的纯函数。这几个文件都只在被直接执行时才跑 CLI，import 进来没有副作用。
-import { packFromTag, tagForVersion, verifyReleaseState } from '../scripts/pack-from-tag.mjs'
+import { packFromTag, tagForVersion, tagProblem, verifyReleaseState } from '../scripts/pack-from-tag.mjs'
 import { shippedPaths } from '../scripts/shipped-paths.mjs'
 import { findPackageDependency } from '../scripts/snapshot.mjs'
+import { diffTarballAgainstTag, registryTarballUrl } from '../scripts/verify-published.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
@@ -2117,6 +2118,92 @@ await test('snapshot CLI：profile 不存在时报错退出，不去猜别的路
   } finally {
     fs.rmSync(dshHome, { recursive: true, force: true })
   }
+})
+
+await test('tagProblem 只判 tag，不掺脏树', () => {
+  assert.equal(tagProblem({ version: '1.2.3', describedTag: 'v1.2.3' }), null)
+  assert.match(tagProblem({ version: '1.2.3', describedTag: null }), /没有 tag 精确指向 HEAD/)
+  assert.match(tagProblem({ version: '1.2.3', describedTag: 'v9.9.9' }), /没有落在 tag v1\.2\.3 上/)
+  // 版本号缺失时也要有话说，而不是拼出 "vundefined"。
+  assert.match(tagProblem({ version: '', describedTag: null }), /读不到 package\.json 的 version/)
+  // 关键区别：这条检查**不**因为脏树而变化 —— 脏树归 verifyReleaseState 管，
+  // prepublish-check 的默认模式正是靠这一点才能只提示 tag、不重复报脏树。
+  assert.equal(tagProblem({ version: '1.2.3', describedTag: 'v1.2.3', porcelain: ' M x' }), null)
+})
+
+await test('registryTarballUrl 拼出 npm 的规范 tarball 地址', () => {
+  assert.equal(
+    registryTarballUrl('dsh-linux-desktop', '1.2.3'),
+    'https://registry.npmjs.org/dsh-linux-desktop/-/dsh-linux-desktop-1.2.3.tgz',
+  )
+  assert.equal(
+    registryTarballUrl('p', '1.0.0', 'https://example.com'),
+    'https://example.com/p/-/p-1.0.0.tgz',
+  )
+})
+
+await test('diffTarballAgainstTag 认得出「内容不同」和「tag 里没有」', () => {
+  const dir = makeTaggedRepo('diff-tag')
+  try {
+    const dest = path.join(dir, 'out')
+    fs.mkdirSync(dest)
+    const { tgz } = packFromTag({ root: dir, dest, version: '1.2.3' })
+
+    // 与 tag 一致时应当干净。
+    const clean = diffTarballAgainstTag({ tgz, root: dir, tag: 'v1.2.3' })
+    assert.deepEqual(clean.mismatched, [])
+    assert.deepEqual(clean.missing, [])
+    assert.ok(clean.files.includes('src/index.js'))
+
+    // 把 tag 挪到一个内容不同的提交上：同一个 tgz 就该被判「内容不同」。
+    gitIn(dir, ['-c', 'user.name=test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false',
+      'commit', '--allow-empty', '-m', 'move tag target'])
+    gitIn(dir, ['tag', '-f', 'v1.2.3'])
+    fs.writeFileSync(path.join(dir, 'src', 'index.js'), '// 改过了\n')
+    gitIn(dir, ['add', '-A'])
+    gitIn(dir, ['-c', 'user.name=test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false',
+      'commit', '-m', 'change'])
+    gitIn(dir, ['tag', '-f', 'v1.2.3'])
+
+    const dirty = diffTarballAgainstTag({ tgz, root: dir, tag: 'v1.2.3' })
+    assert.deepEqual(dirty.mismatched, ['src/index.js'])
+
+    // tag 里根本没有这个文件时，应当归到 missing 而不是 mismatched。
+    fs.writeFileSync(path.join(dir, 'src', 'brand-new.js'), '// 新增\n')
+    gitIn(dir, ['add', '-A'])
+    gitIn(dir, ['-c', 'user.name=test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false',
+      'commit', '-m', 'add file'])
+    gitIn(dir, ['tag', '-f', 'v1.2.3'])
+    const removed = diffTarballAgainstTag({ tgz, root: dir, tag: 'v1.2.3' })
+    assert.ok(!removed.missing.includes('src/index.js'), 'tag 里有 index.js，不该报 missing')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+await test('pre-commit 钩子存在、可执行，且用的是提交前模式', () => {
+  const hook = path.join(ROOT, '.githooks', 'pre-commit')
+  assert.ok(fs.existsSync(hook), '.githooks/pre-commit 必须存在')
+  // 可执行位丢了 git 会**静默**跳过钩子 —— 那是最难发现的一种失效，所以钉住它。
+  const mode = fs.statSync(hook).mode
+  assert.ok((mode & 0o111) !== 0, '.githooks/pre-commit 必须有可执行位')
+  const text = fs.readFileSync(hook, 'utf8')
+  assert.match(text, /prepublish-check\.mjs/)
+  assert.match(text, /--pre-commit/, '钩子必须用提交前模式，否则「工作区干净」那一项会把每次提交都拦下')
+})
+
+await test('package.json 的发布相关脚本都指向真实存在的文件', () => {
+  const scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts
+  for (const key of ['release', 'verify:published', 'pack:tag', 'snapshot', 'check', 'check:pre-commit']) {
+    const command = scripts[key]
+    assert.ok(command, `缺少 npm script：${key}`)
+    const referenced = /node (scripts\/[\w.-]+\.mjs)/.exec(command)?.[1]
+    assert.ok(referenced, `${key} 应当指向一个 scripts/*.mjs`)
+    assert.ok(fs.existsSync(path.join(ROOT, referenced)), `${key} 指向的文件不存在：${referenced}`)
+  }
+  // prepublishOnly 必须是 --release 模式：默认模式只把 tag 当提示，拦不住
+  // 「工作区干净但 tag 指向别的提交」这个漏口。
+  assert.match(scripts.prepublishOnly, /--release/)
 })
 
 // ---------------------------------------------------------------------------

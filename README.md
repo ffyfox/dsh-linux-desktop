@@ -304,7 +304,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 在仓库根目录执行：
 
 ```bash
-node test/smoke.mjs                                   # 冒烟测试，用例共 152 项，零依赖
+node test/smoke.mjs                                   # 冒烟测试，用例共 157 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
 node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录
@@ -316,16 +316,50 @@ node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰
 
 ### 发布
 
-制品只从 tag 产出，不再从工作区产出：
+**一条命令跑完机械步骤：**
+
+```bash
+npm run release      # 校验（--release）→ 从 tag 产出制品 → 打印发布命令
+```
+
+它会跑完整校验、把 tag 的树导出到临时目录打包、逐字节核对，然后打印出可以直接复制的 `npm publish` 命令。**它故意不发布** —— npm 要求浏览器确认，而且「现在要不要发」是判断不是机械步骤。
+
+手动分步的话是这样：
 
 ```bash
 npm run check                        # 发布前校验（含「会进包的文件都已提交」）
-git tag v0.5.0                       # tag 打在该发布的那个提交上
+git tag -a v0.5.1 -m "…"             # tag 必须精确打在 HEAD 上
 npm run pack:tag                     # 从 tag 导出、在临时目录里打包，并逐文件核对
 npm publish <上一步打印的 tgz 路径>   # 发的是这个 tgz，不是工作区
 ```
 
-`npm run pack:tag` 会拒绝三种状态：会进包的文件有未提交改动、`HEAD` 没有被 `v<版本>` 精确指着、该 tag 不存在。它把 tag 的树导出到临时目录，**在临时目录里**执行 `npm pack`，再把 tgz 里每个文件的字节与导出树逐个比对 —— 这样「GitHub 上的 v0.4.1」与「npm 上的 0.4.1」不可能再不一样（那次的成因正是 `npm publish` 打包了带未提交改动的工作区，而 tag 又打错了位置）。
+`npm publish` **必须显式带 `--registry=https://registry.npmjs.org`**：本机 npm 的默认源是只读镜像。没有 TTY 的环境还需要伪终端驱动，否则 npm 会拒绝并把登录 URL 打码。
+
+`pack:tag` 会拒绝三种状态：会进包的文件有未提交改动、`HEAD` 没有被 `v<版本>` 精确指着、该 tag 不存在。它把 tag 的树导出到临时目录，**在临时目录里**执行 `npm pack`，再把 tgz 里每个文件的字节与导出树逐个比对 —— 这样「GitHub 上的 v0.4.1」与「npm 上的 0.4.1」不可能再不一样（那次的成因正是 `npm publish` 打包了带未提交改动的工作区，而 tag 又打错了位置）。
+
+发布之后**必须核对**（这一步才是真正坐实「发布 == tag」的）：
+
+```bash
+npm run verify:published             # 下载 npm 上的包，与 tag 逐文件比对
+```
+
+#### 校验的两个模式
+
+| 命令 | tag 不指向 HEAD 时 | 用途 |
+|---|---|---|
+| `npm run check` | 只提示（正常开发状态） | 平时手动跑 |
+| `npm run check:pre-commit` | 只提示，且跳过「打包产物完整性」与「工作区干净」 | git pre-commit 钩子 |
+| `npm run check -- --release` | **致命，拒绝** | `prepublishOnly` 与 `npm run release` |
+
+`--release` 补的是一个真实漏口：从仓库根直接敲 `npm publish`（不带 tgz 参数）时，`prepublishOnly` 会跑到校验，但默认模式只把 tag 当提示 —— 于是「工作区干净、tag 却指向别的提交」会被放行，而那正是 0.4.1 事故的另一半。
+
+#### 提交前自动校验
+
+```bash
+npm run hooks:install                # 每个克隆跑一次，设置 core.hooksPath
+```
+
+之后每次 `git commit` 都会先跑 `check:pre-commit`（约 5 秒）。急事用 `git commit --no-verify` 跳过。
 
 要看日常那套跑的到底是哪个版本，用快照把它指向刚打出的 tgz：
 

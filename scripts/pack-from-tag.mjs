@@ -37,6 +37,40 @@ export function tagForVersion(version) {
 }
 
 /**
+ * 只判「tag 是否精确指向 HEAD」，返回问题描述（null = 没问题）。
+ *
+ * 单独抽出来是因为它有两个调用方，而两边的**严重程度不同**：
+ *   - packFromTag / `npm run release`：致命，直接拒绝出制品。
+ *   - prepublish-check：默认只当提示（平时 `npm run check` 当然没有 tag 指向 HEAD，
+ *     那是正常开发状态），只有 `--release` 模式（`prepublishOnly` 与
+ *     `npm run release` 走的就是它）才升级成致命。
+ *
+ * 这条检查补的是一个真实的漏口：从仓库根直接敲 `npm publish` 时，`prepublishOnly`
+ * 会查「工作区是否干净」，但**不查 tag** —— 于是「工作区干净、tag 却指向别的提交」
+ * 会被放行，而那正是 0.4.1 事故的另一半。
+ *
+ * @param {{ version?: string, describedTag?: string | null }} options
+ * @returns {string | null}
+ */
+export function tagProblem({ version, describedTag }) {
+  if (!version) {
+    return '读不到 package.json 的 version，无法确定该用哪个 tag\n      → 补上 version 字段再打包'
+  }
+
+  const tag = tagForVersion(version)
+  const described = String(describedTag ?? '').trim()
+  if (described === tag) return null
+
+  // 分开报「没有 tag 指向 HEAD」和「HEAD 被别的 tag 指着」：前者的修法是打 tag，
+  // 后者的修法是把 tag 挪过来 —— 两者要敲的命令不一样。
+  return described
+    ? `HEAD 没有落在 tag ${tag} 上：git describe --tags --exact-match HEAD 得到的是 ${described}\n` +
+        `      → tag 打在哪，制品就来自哪。确认该发布的是哪个提交，再 git tag -f ${tag} <提交>`
+    : `没有 tag 精确指向 HEAD（按版本号应为 ${tag}）\n` +
+        `      → 在当前提交上打 ${tag} 再打包；tag 打错位置正是 0.4.1 那次事故的一半`
+}
+
+/**
  * 判断「现在这个状态能不能从 tag 出制品」，返回问题列表（空数组 = 没问题）。
  *
  * 刻意做成纯函数：测试要覆盖「脏工作区 / tag 不匹配 / tag 缺失」这几种情况，而造出
@@ -44,22 +78,17 @@ export function tagForVersion(version) {
  *
  * 入参：
  *   version      package.json 里的版本号
- *   porcelain    `git status --porcelain -- <SHIPPED_PATHS>` 的输出
+ *   porcelain    `git status --porcelain -- <会进包的路径>` 的输出
  *   describedTag `git describe --tags --exact-match HEAD` 的输出（没有精确 tag 时为 null）
  *
  * 「tag 是否存在」不在这里判：那需要额外一次 `git rev-parse --verify`，而本函数的
  * 入参里没有它的位置。调用方（packFromTag）拿到 rev-parse 结果后自行补一条问题。
  */
 export function verifyReleaseState({ version, porcelain, describedTag }) {
+  // 没有版本号就推导不出 tag，脏树检查也就没有意义了（连要发哪个版本都不知道）。
+  if (!version) return [tagProblem({ version, describedTag })]
+
   const problems = []
-
-  if (!version) {
-    // 没有版本号就推导不出 tag，后面的判断全部无从谈起，直接返回。
-    problems.push('读不到 package.json 的 version，无法确定该用哪个 tag\n      → 补上 version 字段再打包')
-    return problems
-  }
-
-  const tag = tagForVersion(version)
 
   const dirty = String(porcelain ?? '').trim()
   if (dirty.length > 0) {
@@ -72,18 +101,8 @@ export function verifyReleaseState({ version, porcelain, describedTag }) {
     )
   }
 
-  const described = String(describedTag ?? '').trim()
-  if (described !== tag) {
-    // 分开报「没有 tag 指向 HEAD」和「HEAD 被别的 tag 指着」：前者的修法是打 tag，
-    // 后者的修法是把 tag 挪过来 —— 两者要敲的命令不一样。
-    problems.push(
-      described
-        ? `HEAD 没有落在 tag ${tag} 上：git describe --tags --exact-match HEAD 得到的是 ${described}\n` +
-            `      → tag 打在哪，制品就来自哪。确认该发布的是哪个提交，再 git tag -f ${tag} <提交>`
-        : `没有 tag 精确指向 HEAD（按版本号应为 ${tag}）\n` +
-            `      → 在当前提交上打 ${tag} 再打包；tag 打错位置正是 0.4.1 那次事故的一半`,
-    )
-  }
+  const tagIssue = tagProblem({ version, describedTag })
+  if (tagIssue) problems.push(tagIssue)
 
   return problems
 }

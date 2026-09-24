@@ -305,7 +305,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 Run these from the repository root:
 
 ```bash
-node test/smoke.mjs                                   # smoke tests, 152 checks total, zero dependencies
+node test/smoke.mjs                                   # smoke tests, 157 checks total, zero dependencies
 node scripts/prepublish-check.mjs                     # pre-publish validation
 npm pack --dry-run                                    # validate the package contents
 node bin/dsh-desktop.js install --root /tmp/sandbox   # sandboxed install, touches nothing real
@@ -317,16 +317,50 @@ The first three are the commands CI runs on every push and pull request, and the
 
 ### Releasing
 
-Artifacts come from a tag, never from the working tree:
+**One command runs the mechanical steps:**
+
+```bash
+npm run release      # validate (--release) → produce the artifact from the tag → print the publish command
+```
+
+It runs the full validation, exports the tag's tree and packs it in a temp directory, verifies it byte for byte, then prints a ready-to-paste `npm publish` command. **It deliberately does not publish** — npm requires a browser confirmation, and "should this go out now" is a judgement call, not a mechanical step.
+
+Step by step, if you prefer:
 
 ```bash
 npm run check                        # pre-publish validation (including "shipped files are committed")
-git tag v0.5.0                       # tag the commit that should be released
+git tag -a v0.5.1 -m "…"             # the tag must point exactly at HEAD
 npm run pack:tag                     # export the tag, pack in a temp dir, verify file by file
 npm publish <the tgz path printed above>   # publish that tgz, not the working tree
 ```
 
+`npm publish` **must carry `--registry=https://registry.npmjs.org` explicitly**: this machine's default npm registry is a read-only mirror. An environment without a TTY also needs a pty driver, or npm refuses and redacts the login URL.
+
 `npm run pack:tag` refuses three states: uncommitted changes under the shipped paths, `HEAD` not exactly tagged `v<version>`, or that tag missing. It exports the tag's tree to a temp directory, runs `npm pack` **inside that temp directory**, then compares every file in the tgz byte for byte against the exported tree — so "v0.4.1 on GitHub" and "0.4.1 on npm" can never diverge again (that incident was caused by `npm publish` packing a working tree with uncommitted changes, on top of a tag pointing at the wrong commit).
+
+After publishing, **verify** — this is the step that actually settles "published == tag":
+
+```bash
+npm run verify:published             # download the package from npm and diff it against the tag
+```
+
+#### The two validation modes
+
+| Command | When the tag does not point at HEAD | Use |
+|---|---|---|
+| `npm run check` | reported as a note (normal during development) | run by hand |
+| `npm run check:pre-commit` | note, and skips both "package contents" and "clean working tree" | the git pre-commit hook |
+| `npm run check -- --release` | **fatal, refuses** | `prepublishOnly` and `npm run release` |
+
+`--release` closes a real hole: running `npm publish` from the repository root (no tarball argument) makes `prepublishOnly` run the validation, but the default mode only *notes* a tag mismatch — so "clean working tree, tag pointing at a different commit" would slip through. That is the other half of the 0.4.1 incident.
+
+#### Validate before every commit
+
+```bash
+npm run hooks:install                # once per clone; sets core.hooksPath
+```
+
+Every `git commit` then runs `check:pre-commit` (about 5 seconds) first. Use `git commit --no-verify` to skip it in a hurry.
 
 To check which version the everyday profile is actually running, point it at a freshly packed tgz:
 

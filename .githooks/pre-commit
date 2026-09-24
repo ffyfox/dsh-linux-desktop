@@ -1,0 +1,17 @@
+#!/bin/sh
+# 提交前跑一遍快速校验。
+#
+# 为什么放在这里：README 里写的用例数量、隐私指纹、测试是否全绿 —— 这几样都是
+# 「改完之后很容易忘」的东西，而漏掉的代价要到发布那一刻才显现，那时候已经不可逆了。
+#
+# 用 --pre-commit（提交前模式）：它会跳过两项只在发布那一刻才有意义的检查 ——
+# 「打包产物完整性」（要起一次 npm）与「工作区干净」（钩子跑在提交之前，那一刻
+# 工作区理所当然不干净，不跳过的话每次提交都会被它自己拦下）。
+#
+# 急事可以用 `git commit --no-verify` 跳过。
+#
+# 安装（每个克隆一次）：npm run hooks:install
+set -e
+
+ROOT=$(git rev-parse --show-toplevel)
+exec node "$ROOT/scripts/prepublish-check.mjs" --pre-commit
