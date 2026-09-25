@@ -1,11 +1,11 @@
 /**
- * `dsh-desktop` 命令行实现。
+ * `dsh-lxi` 命令行实现。
  *
  * 刻意不引入 commander 之类的依赖：这个 CLI 的参数面很小，手写解析能保证
  * 插件零运行时依赖 —— 对一个要 `dsh plugin add` 装进用户 profile 的包来说，
  * 依赖越少，装得越快、越不容易和用户已有的包冲突。
  *
- * @module dsh-linux-desktop/cli
+ * @module dsh-linux-integration/cli
  */
 
 import fs from 'node:fs'
@@ -18,19 +18,19 @@ import { resolvePaths } from './paths.js'
 import { clearRuntime, inspectRuntime, probePort } from './runtime.js'
 import { resolveServerTarget, startServerDetached, stopServerProcess, waitForServer } from './server.js'
 
-const USAGE = `dsh-desktop —— DeepSeek Harness 的 Linux 桌面集成管理
+const USAGE = `dsh-lxi —— DeepSeek Harness 的 Linux 桌面集成管理
 
 用法：
-  dsh-desktop install [选项]     安装 / 修复桌面集成（幂等）
-  dsh-desktop uninstall          移除桌面集成（保留配置与备份）
-  dsh-desktop status             查看安装状态与健康检查
-  dsh-desktop doctor             诊断并给出修复建议
-  dsh-desktop config [--edit]    查看配置文件位置与内容
-  dsh-desktop set <键> <值>      修改一项配置并重新安装
-  dsh-desktop open               直接以独立窗口打开 dsh（等价于点桌面图标）
-  dsh-desktop stop               停止当前正在运行的 dsh web
-  dsh-desktop restart            重启 dsh web（装完插件后需要重启才生效）
-  dsh-desktop runtime            查看当前 dsh web 的运行时状态
+  dsh-lxi install [选项]     安装 / 修复桌面集成（幂等）
+  dsh-lxi uninstall          移除桌面集成（保留配置与备份）
+  dsh-lxi status             查看安装状态与健康检查
+  dsh-lxi doctor             诊断并给出修复建议
+  dsh-lxi config [--edit]    查看配置文件位置与内容
+  dsh-lxi set <键> <值>      修改一项配置并重新安装
+  dsh-lxi open               直接以独立窗口打开 dsh（等价于点桌面图标）
+  dsh-lxi stop               停止当前正在运行的 dsh web
+  dsh-lxi restart            重启 dsh web（装完插件后需要重启才生效）
+  dsh-lxi runtime            查看当前 dsh web 的运行时状态
 
 stop / restart 选项：
   --force                跳过「目标进程确实是 dsh web」的身份校验（危险，仅在确认后使用）
@@ -213,7 +213,7 @@ export async function run(argv, io = {}) {
       for (const warning of warnings) out.write(`  ${p.yellow('警告')} ${warning}\n`)
 
       if (!result.ok) {
-        out.write(`\n${p.red('安装未完成')}。运行 ${p.bold('dsh-desktop doctor')} 查看诊断。\n`)
+        out.write(`\n${p.red('安装未完成')}。运行 ${p.bold('dsh-lxi doctor')} 查看诊断。\n`)
         return 1
       }
 
@@ -298,7 +298,7 @@ export async function run(argv, io = {}) {
       const [key, ...rest] = positional
       const value = rest.join(' ')
       if (!key || value.length === 0) {
-        err.write(`${p.red('用法')}：dsh-desktop set <键> <值>\n`)
+        err.write(`${p.red('用法')}：dsh-lxi set <键> <值>\n`)
         err.write(`可用键：${Object.keys(defaultConfig()).join(', ')}\n`)
         return 2
       }
@@ -435,13 +435,13 @@ export async function run(argv, io = {}) {
       }
       out.write(`${p.green('dsh web 已就绪')} → http://${host}:${String(port)}/\n`)
       out.write(`  ${p.dim(`日志：${paths.logFile}`)}\n`)
-      out.write(`  ${p.dim('提示：用 dsh-desktop stop 可以再次停止它。')}\n`)
+      out.write(`  ${p.dim('提示：用 dsh-lxi stop 可以再次停止它。')}\n`)
       return 0
     }
 
     case 'open': {
       if (!fs.existsSync(paths.launcherFile)) {
-        err.write(`${p.red('尚未安装')}。请先运行：dsh-desktop install\n`)
+        err.write(`${p.red('尚未安装')}。请先运行：dsh-lxi install\n`)
         return 1
       }
       const { spawn } = await import('node:child_process')
@@ -486,16 +486,16 @@ function buildAdvice(report, paths) {
     advice.push('安装一个 Chromium 系浏览器：sudo pacman -S chromium（Arch）／sudo apt install chromium（Debian）／sudo dnf install chromium（Fedora）')
   }
   if (!byId.launcher?.ok || !byId['desktop-entry']?.ok) {
-    advice.push(`运行 dsh-desktop install 生成缺失的文件（预期位置：${paths.launcherFile}）`)
+    advice.push(`运行 dsh-lxi install 生成缺失的文件（预期位置：${paths.launcherFile}）`)
   }
   if (byId['desktop-entry']?.ok && !byId['desktop-entry-alias']?.ok) {
-    advice.push('app_id 别名入口缺失 —— 这会让任务栏显示成黄色的通用 Wayland 图标。运行 dsh-desktop install --force 重建。')
+    advice.push('app_id 别名入口缺失 —— 这会让任务栏显示成黄色的通用 Wayland 图标。运行 dsh-lxi install --force 重建。')
   }
   if (byId['app-id-match'] && !byId['app-id-match'].ok) {
-    advice.push('桌面入口里的 StartupWMClass 与实际窗口 app_id 不一致。通常是改过 host 配置：运行 dsh-desktop install --force 让入口跟上配置。')
+    advice.push('桌面入口里的 StartupWMClass 与实际窗口 app_id 不一致。通常是改过 host 配置：运行 dsh-lxi install --force 让入口跟上配置。')
   }
   if (byId['kwin-rule'] && !byId['kwin-rule'].ok) {
-    advice.push('KWin 窗口规则缺失：窗口可能在高分屏下纵向拉满。运行 dsh-desktop install --force 重建。')
+    advice.push('KWin 窗口规则缺失：窗口可能在高分屏下纵向拉满。运行 dsh-lxi install --force 重建。')
   }
   if (byId['gnome-window-size'] && !byId['gnome-window-size'].ok) {
     advice.push(

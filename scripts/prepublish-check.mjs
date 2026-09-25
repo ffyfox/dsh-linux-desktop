@@ -71,7 +71,7 @@ for (const file of required) {
   else fail(`缺少必要文件：${file}`)
 }
 
-const binRel = pkg.bin?.['dsh-desktop']
+const binRel = pkg.bin?.['dsh-lxi']
 if (binRel && fs.existsSync(path.join(ROOT, binRel))) ok(`bin 入口存在（${binRel}）`)
 else fail(`bin 入口缺失：${binRel ?? '(package.json 未声明 bin)'}`)
 
@@ -95,7 +95,7 @@ if (repoUrl.length === 0) {
 } else if (PLACEHOLDER.test(repoUrl)) {
   fail(
     `repository.url 看起来还是占位地址：${repoUrl}`,
-    '改成你真实的 GitHub 仓库地址，例如 git+https://github.com/<你的用户名>/dsh-linux-desktop.git',
+    '改成你真实的 GitHub 仓库地址，例如 git+https://github.com/<你的用户名>/dsh-linux-integration.git',
   )
 } else {
   ok(`repository 已填写：${repoUrl}`)
@@ -151,7 +151,7 @@ if (PRE_COMMIT_MODE) {
     const mustShip = [
       'package.json',
       'cordis.patch.yml',
-      'bin/dsh-desktop.js',
+      'bin/dsh-lxi.js',
       'src/index.js',
       'src/client.js',
       'src/settings.js',

@@ -2,9 +2,9 @@
 # ============================================================================
 #  DeepSeek Harness —— Linux 桌面启动器
 #
-#  本文件由 dsh-linux-desktop v@@VERSION@@ 自动生成，请勿手工编辑。
+#  本文件由 dsh-linux-integration v@@VERSION@@ 自动生成，请勿手工编辑。
 #  需要改配置请编辑：@@CONFIG_FILE@@
-#  重新生成请执行：  dsh-desktop install --force
+#  重新生成请执行：  dsh-lxi install --force
 #
 #  职责（严格按顺序）：
 #    1. 探测 dsh web 是否已在监听；没在监听就在后台静默拉起。
@@ -50,11 +50,11 @@ RUNTIME_DIR="@@RUNTIME_DIR@@"
 # 找一个永远不会出现的 runtime.env，拿不到带 token 的地址。
 #
 # ⚠️ 下面两行必须与 paths.js 的 runtimeDir / logFile 逐字一致：
-#      runtimeDir = $DSH_DESKTOP_ROOT/runtime/dsh-desktop
-#      logFile    = $DSH_DESKTOP_ROOT/runtime/dsh-desktop-web.log
+#      runtimeDir = $DSH_DESKTOP_ROOT/runtime/dsh-lxi
+#      logFile    = $DSH_DESKTOP_ROOT/runtime/dsh-lxi-web.log
 if [ -n "${DSH_DESKTOP_ROOT:-}" ]; then
-  RUNTIME_DIR="$DSH_DESKTOP_ROOT/runtime/dsh-desktop"
-  LOG_FILE="$DSH_DESKTOP_ROOT/runtime/dsh-desktop-web.log"
+  RUNTIME_DIR="$DSH_DESKTOP_ROOT/runtime/dsh-lxi"
+  LOG_FILE="$DSH_DESKTOP_ROOT/runtime/dsh-lxi-web.log"
 fi
 
 RUNTIME_ENV="$RUNTIME_DIR/runtime.env"
@@ -65,7 +65,7 @@ RUNTIME_JSON="$RUNTIME_DIR/runtime.json"
 HANDOFF_THRESHOLD=3
 
 DEBUG="${DSH_DESKTOP_DEBUG:-0}"
-log() { [ "$DEBUG" = "1" ] && printf '[dsh-desktop] %s\n' "$*" >&2 || true; }
+log() { [ "$DEBUG" = "1" ] && printf '[dsh-lxi] %s\n' "$*" >&2 || true; }
 
 # 带 token 的地址等同于一张 30 天有效的会话通行证，调试日志里必须打码。
 # 字符类里必须同时排除空格与 `&`，否则会一路吃到行尾，把后面的参数也吞掉。
@@ -234,7 +234,7 @@ api_ready() {
 
   local body
   body="$("$CURL" -s -m 5 -b "$jar" -H 'content-type: application/json' \
-    -d '{"type":"client-request","rpcId":"dsh-desktop-probe","method":"session/list","payload":{"args":{"_request":{}}}}' \
+    -d '{"type":"client-request","rpcId":"dsh-lxi-probe","method":"session/list","payload":{"args":{"_request":{}}}}' \
     "http://$HOST:$PORT/api/session/list" 2>/dev/null)" || true
 
   case "$body" in *'"ok":true'*) return 0 ;; esac
@@ -443,7 +443,7 @@ if [ "$STARTED_BY_US" != "1" ]; then
     # KDE Plasma、GNOME、dunst 都会把标题渲染得比正文更大更粗。所以第一句放标题、
     # 去掉句号；第二句原样留在正文。
     notify "dsh web 服务仍在后台运行" \
-      "停止：dsh-desktop stop" low
+      "停止：dsh-lxi stop" low
   fi
   exit 0
 fi
@@ -451,7 +451,7 @@ fi
 if [ "$LIVED" -lt "$HANDOFF_THRESHOLD" ]; then
   if [ "$EFFECTIVE_MODE" = "dedicated" ]; then
     # 独立配置目录下进程本该与窗口同生共死；秒退说明启动失败。
-    notify "DeepSeek Harness 窗口启动失败" "$BROWSER_LABEL 未能打开独立窗口。\n可执行：dsh-desktop doctor" critical
+    notify "DeepSeek Harness 窗口启动失败" "$BROWSER_LABEL 未能打开独立窗口。\n可执行：dsh-lxi doctor" critical
     stop_server "$SERVER_PID"
     exit 1
   fi
@@ -460,7 +460,7 @@ if [ "$LIVED" -lt "$HANDOFF_THRESHOLD" ]; then
   # 用户怎么收掉，否则就只能重启或等下次登录。
   log "检测到窗口移交给既有浏览器进程，无法判定关闭时刻，服务保持运行"
   notify "DeepSeek Harness" \
-    "窗口已交给现有浏览器进程。\n共享配置模式下无法感知窗口关闭，本次启动的 dsh web 会留在后台。\n要停止请执行：dsh-desktop stop；或把 profileMode 改为 dedicated 实现「关窗即停」。" normal
+    "窗口已交给现有浏览器进程。\n共享配置模式下无法感知窗口关闭，本次启动的 dsh web 会留在后台。\n要停止请执行：dsh-lxi stop；或把 profileMode 改为 dedicated 实现「关窗即停」。" normal
   exit 0
 fi
 

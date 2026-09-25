@@ -110,7 +110,7 @@ function section(title) {
 }
 
 function makeSandbox(name) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `dsh-desktop-test-${name}-`))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `dsh-lxi-test-${name}-`))
   return dir
 }
 
@@ -166,7 +166,7 @@ section('FreeDesktop Exec 转义')
 // ---------------------------------------------------------------------------
 
 await test('普通路径不加引号', () => {
-  assert.equal(escapeExecArg('/home/u/.local/bin/dsh-desktop-app'), '/home/u/.local/bin/dsh-desktop-app')
+  assert.equal(escapeExecArg('/home/u/.local/bin/dsh-lxi-app'), '/home/u/.local/bin/dsh-lxi-app')
 })
 
 await test('含空格的路径被引号包裹', () => {
@@ -186,7 +186,7 @@ section('桌面入口渲染')
 await test('渲染出的入口包含 app_id 与启动器路径', () => {
   const content = renderDesktopEntry({
     config: defaultConfig(),
-    launcherPath: '/home/u/.local/bin/dsh-desktop-app',
+    launcherPath: '/home/u/.local/bin/dsh-lxi-app',
     appId: 'chrome-127.0.0.1__-Default',
     iconName: 'deepseek-harness',
     terminalCommand: '',
@@ -194,7 +194,7 @@ await test('渲染出的入口包含 app_id 与启动器路径', () => {
   })
   assert.match(content, /^\[Desktop Entry\]$/m)
   assert.match(content, /^StartupWMClass=chrome-127\.0\.0\.1__-Default$/m)
-  assert.match(content, /^Exec=\/home\/u\/\.local\/bin\/dsh-desktop-app %U$/m)
+  assert.match(content, /^Exec=\/home\/u\/\.local\/bin\/dsh-lxi-app %U$/m)
   assert.match(content, /^Icon=deepseek-harness$/m)
   assert.match(content, /^Terminal=false$/m)
   assert.ok(!content.includes('Actions='), '没有终端命令时不应有 Actions 行')
@@ -216,11 +216,11 @@ await test('提供终端命令时生成 Desktop Action', () => {
 await test('配置了 devProfile 时生成「以开发配置运行」动作', () => {
   const content = renderDesktopEntry({
     config: { ...defaultConfig(), devProfile: 'web-dev' },
-    launcherPath: '/home/u/.local/bin/dsh-desktop-app',
+    launcherPath: '/home/u/.local/bin/dsh-lxi-app',
     appId: 'chrome-127.0.0.1__-Default',
     iconName: 'deepseek-harness',
     terminalCommand: '',
-    devAction: { profile: 'web-dev', port: 3081, root: '/home/u/.cache/dsh-desktop-dev' },
+    devAction: { profile: 'web-dev', port: 3081, root: '/home/u/.cache/dsh-lxi-dev' },
     version: '9.9.9',
   })
   assert.match(content, /^Actions=Dev;$/m)
@@ -228,7 +228,7 @@ await test('配置了 devProfile 时生成「以开发配置运行」动作', ()
   // 三个变量缺一不可：profile 换套、port 防命中日常那套、root 是沙箱。
   assert.match(
     content,
-    /^Exec=env DSH_DESKTOP_PROFILE=web-dev DSH_DESKTOP_PORT=3081 DSH_DESKTOP_ROOT=\/home\/u\/\.cache\/dsh-desktop-dev \/home\/u\/\.local\/bin\/dsh-desktop-app$/m,
+    /^Exec=env DSH_DESKTOP_PROFILE=web-dev DSH_DESKTOP_PORT=3081 DSH_DESKTOP_ROOT=\/home\/u\/\.cache\/dsh-lxi-dev \/home\/u\/\.local\/bin\/dsh-lxi-app$/m,
   )
 })
 
@@ -420,8 +420,8 @@ await test('class 转义：conf 用正则转义，lua 再多翻一层反斜杠',
 
 await test('conf 规则必须同时带 float —— 少了它 size 会被平铺吞掉', () => {
   const block = buildRuleBlock({ format: 'conf', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
-  assert.match(block, /^# dsh-desktop begin$/m)
-  assert.match(block, /^# dsh-desktop end$/m)
+  assert.match(block, /^# dsh-lxi begin$/m)
+  assert.match(block, /^# dsh-lxi end$/m)
   assert.match(block, /windowrule = match:class \^\(chrome-127\\\.0\\\.0\\\.1__-Default\)\$, float on, size 1200 850/)
   assert.ok(!block.includes('windowrulev2'), '0.56 上 windowrulev2 是硬错误，绝不能写')
   assert.ok(!block.includes('source'), '绝不能写 source= —— 目标文件缺失会让整个配置加载失败')
@@ -429,8 +429,8 @@ await test('conf 规则必须同时带 float —— 少了它 size 会被平铺�
 
 await test('lua 规则用 hl.window_rule 且 float/size 是 lua 写法', () => {
   const block = buildRuleBlock({ format: 'lua', appId: HYPR_APP_ID, size: { width: 1200, height: 850 } })
-  assert.match(block, /^-- dsh-desktop begin$/m)
-  assert.match(block, /^-- dsh-desktop end$/m)
+  assert.match(block, /^-- dsh-lxi begin$/m)
+  assert.match(block, /^-- dsh-lxi end$/m)
   assert.match(block, /hl\.window_rule\(\{/)
   assert.match(block, /float = true,/)
   assert.match(block, /size {2}= "1200 850",/)
@@ -530,7 +530,7 @@ await test('lua：追加与移除同样保留用户内容', () => {
 await test('标记块不完整时不误删（宁可不动）', () => {
   const dir = makeSandbox('hypr-broken-mark')
   const file = path.join(dir, 'hyprland.conf')
-  const broken = `monitor = , preferred, auto, 1\n# dsh-desktop begin\nwindowrule = match:class ^(x)$, float on, size 1 1\n`
+  const broken = `monitor = , preferred, auto, 1\n# dsh-lxi begin\nwindowrule = match:class ^(x)$, float on, size 1 1\n`
   fs.writeFileSync(file, broken)
   const result = removeWindowRule({ file, format: 'conf' })
   assert.equal(result.changed, false, '只有 begin 没有 end，应当拒绝删除')
@@ -1431,17 +1431,17 @@ await test('沙箱模式忽略 HOME / XDG_* 环境变量', () => {
 
 await test('非沙箱模式遵循 XDG 变量', () => {
   const paths = resolvePaths({ HOME: '/h', XDG_CONFIG_HOME: '/c', XDG_DATA_HOME: '/d', XDG_RUNTIME_DIR: '/r' })
-  assert.equal(paths.configDir, '/c/dsh-desktop')
+  assert.equal(paths.configDir, '/c/dsh-lxi')
   assert.equal(paths.applicationsDir, '/d/applications')
-  assert.equal(paths.runtimeDir, '/r/dsh-desktop')
+  assert.equal(paths.runtimeDir, '/r/dsh-lxi')
 })
 
 await test('devRootDir 落在缓存目录里，并跟随 XDG 与沙箱', () => {
-  assert.equal(resolvePaths({ HOME: '/h' }).devRootDir, '/h/.cache/dsh-desktop-dev')
-  assert.equal(resolvePaths({ HOME: '/h', XDG_CACHE_HOME: '/c' }).devRootDir, '/c/dsh-desktop-dev')
+  assert.equal(resolvePaths({ HOME: '/h' }).devRootDir, '/h/.cache/dsh-lxi-dev')
+  assert.equal(resolvePaths({ HOME: '/h', XDG_CACHE_HOME: '/c' }).devRootDir, '/c/dsh-lxi-dev')
 
   const sandboxed = resolvePaths({ HOME: '/h', XDG_CACHE_HOME: '/c', DSH_DESKTOP_ROOT: '/sandbox' })
-  assert.equal(sandboxed.devRootDir, '/sandbox/home/.cache/dsh-desktop-dev')
+  assert.equal(sandboxed.devRootDir, '/sandbox/home/.cache/dsh-lxi-dev')
   assert.equal(sandboxed.cacheHome, '/sandbox/home/.cache')
 })
 
@@ -1651,27 +1651,27 @@ await test('后台运行通知已精简，旧的冗长文案不再存在', () =>
   // 0.1.x 的原文（三行、含「为什么不停」的解释）。它必须彻底消失 ——
   // 逐字符比对，不做模糊匹配。
   const legacy = '窗口已关闭，但 dsh web 仍在后台运行。\\n它是从终端或其它方式启动的，'
-    + '桌面启动器不会去停它（避免误杀你自己的服务）。\\n要停止请执行：dsh-desktop stop'
+    + '桌面启动器不会去停它（避免误杀你自己的服务）。\\n要停止请执行：dsh-lxi stop'
   assert.ok(!template.includes(legacy), '模板里仍残留 0.1.x 的长文案')
   // 0.2.0 早期版本的两行文案（第一句在正文里）。也必须消失，否则说明
   // 「第一句提到标题」这一步没做。
-  const twoLineBody = 'dsh web 服务仍在后台运行。\\n停止：dsh-desktop stop'
+  const twoLineBody = 'dsh web 服务仍在后台运行。\\n停止：dsh-lxi stop'
   assert.ok(!template.includes(twoLineBody), '模板里仍把第一句留在正文中')
 
   // 第一句走通知标题（唯一能拿到「较大较粗」字样的字段），去掉句号；
   // 第二句原样留在正文。
   assert.ok(
-    template.includes('notify "dsh web 服务仍在后台运行" \\\n      "停止：dsh-desktop stop" low'),
+    template.includes('notify "dsh web 服务仍在后台运行" \\\n      "停止：dsh-lxi stop" low'),
     '模板里缺少「第一句作标题、第二句作正文」的通知',
   )
   assert.ok(!template.includes('dsh web 服务仍在后台运行。'), '第一句不应再带句号')
-  assert.ok(template.includes('停止：dsh-desktop stop'), '第二句必须保持不变')
+  assert.ok(template.includes('停止：dsh-lxi stop'), '第二句必须保持不变')
 
   // 渲染后的启动脚本同样如此。
   const rendered = fs.readFileSync(installPaths.launcherFile, 'utf8')
   assert.ok(!rendered.includes(legacy), '生成的启动脚本里仍残留旧文案')
   assert.ok(rendered.includes('"dsh web 服务仍在后台运行"'), '生成的启动脚本里缺少标题形式的通知')
-  assert.ok(rendered.includes('"停止：dsh-desktop stop"'), '生成的启动脚本里缺少停止命令正文')
+  assert.ok(rendered.includes('"停止：dsh-lxi stop"'), '生成的启动脚本里缺少停止命令正文')
 })
 
 await test('启动器在开窗前等待 Loader 树落定（冷启动空侧栏的根因修复）', () => {
@@ -1848,18 +1848,18 @@ section('包清单')
 
 await test('package.json 声明了 dsh.bundle.patch 且文件存在', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
-  assert.equal(pkg.name, 'dsh-linux-desktop')
+  assert.equal(pkg.name, 'dsh-linux-integration')
   assert.ok(pkg.dsh?.bundle?.patch, '没有 dsh.bundle.patch 就只会作为普通依赖安装，不会成为 profile 层')
   assert.ok(fs.existsSync(path.join(ROOT, pkg.dsh.bundle.patch)))
-  assert.ok(pkg.bin?.['dsh-desktop'], '缺少 CLI bin 入口')
-  assert.ok(fs.existsSync(path.join(ROOT, pkg.bin['dsh-desktop'])))
+  assert.ok(pkg.bin?.['dsh-lxi'], '缺少 CLI bin 入口')
+  assert.ok(fs.existsSync(path.join(ROOT, pkg.bin['dsh-lxi'])))
   assert.equal(pkg.license, 'MIT')
   assert.ok(fs.existsSync(path.join(ROOT, 'LICENSE')))
 })
 
 await test('cordis.patch.yml 引用了本包名', () => {
   const patch = fs.readFileSync(path.join(ROOT, 'cordis.patch.yml'), 'utf8')
-  assert.match(patch, /name: dsh-linux-desktop/)
+  assert.match(patch, /name: dsh-linux-integration/)
   assert.match(patch, /id: linux-desktop/)
 })
 
@@ -1880,7 +1880,7 @@ section('发布制品必须来自 tag（pack-from-tag / snapshot）')
 //
 // 前半段是纯函数（不碰 git），后半段在一个临时仓库里真跑一遍打包。
 
-const SNAPSHOT_PACKAGE = 'dsh-linux-desktop'
+const SNAPSHOT_PACKAGE = 'dsh-linux-integration'
 
 await test('会进包的路径清单从 package.json 的 files 推导（两处闸门共用一份）', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
@@ -1989,7 +1989,7 @@ await test('findPackageDependency：键等于包名即命中', () => {
 await test('findPackageDependency：值是指向本包 tgz 的 file: 时命中', () => {
   assert.equal(
     findPackageDependency(
-      { desktop: 'file:/tmp/snapshots/dsh-linux-desktop-1.2.3.tgz' },
+      { desktop: 'file:/tmp/snapshots/dsh-linux-integration-1.2.3.tgz' },
       { packageName: SNAPSHOT_PACKAGE, repoRoot: '/repo' },
     ),
     'desktop',
@@ -2013,7 +2013,7 @@ await test('findPackageDependency：link: 指向本仓库根目录时命中', ()
       {
         packageName: SNAPSHOT_PACKAGE,
         repoRoot: `/home/me/projects/${SNAPSHOT_PACKAGE}`,
-        profileDir: '/home/me/projects/dsh-desktop-profile',
+        profileDir: '/home/me/projects/dsh-lxi-profile',
       },
     ),
     'desktop',
@@ -2142,8 +2142,8 @@ await test('parseVerifyArgs 解析 --version，拒绝不认识的参数', () => 
 
 await test('registryTarballUrl 拼出 npm 的规范 tarball 地址', () => {
   assert.equal(
-    registryTarballUrl('dsh-linux-desktop', '1.2.3'),
-    'https://registry.npmjs.org/dsh-linux-desktop/-/dsh-linux-desktop-1.2.3.tgz',
+    registryTarballUrl('dsh-linux-integration', '1.2.3'),
+    'https://registry.npmjs.org/dsh-linux-integration/-/dsh-linux-integration-1.2.3.tgz',
   )
   assert.equal(
     registryTarballUrl('p', '1.0.0', 'https://example.com'),
@@ -2416,7 +2416,7 @@ function loadClientBundle() {
     },
   })
   assert.ok(entry, 'client.js 应当调用 window.__ModuleLoader__.load')
-  assert.equal(entry.id, 'dsh-linux-desktop', 'id 必须逐字等于包名，否则加载器会拒绝注册')
+  assert.equal(entry.id, 'dsh-linux-integration', 'id 必须逐字等于包名，否则加载器会拒绝注册')
 
   const requireStub = (name) => {
     if (name === 'react') return {}
@@ -2470,7 +2470,7 @@ await test('DSH 0.1.7：服务改名成 configForms 后，卡片照常注册', (
 
   const spec = ctx.injected[0].fn()
   assert.equal(spec.key, 'linux-desktop', 'key 必须等于宿主注册的 settings 命名空间，否则卡片不会被派发')
-  assert.equal(spec.locale, 'dsh-linux-desktop', '文案命名空间用的是包名，别和设置命名空间混了')
+  assert.equal(spec.locale, 'dsh-linux-integration', '文案命名空间用的是包名，别和设置命名空间混了')
   assert.ok(spec.inject().hooks.linuxDesktopCard, '卡片应当拿到 store')
 })
 
@@ -2529,8 +2529,8 @@ await linuxOnly('isDshWebProcess 认得出 dsh web 命令行', async () => {
 
 await linuxOnly('isDshWebProcess 也认 --profile 写法（0.5.0 起拉起命令的统一形式）', async () => {
   const dir = makeSandbox('dshprofile')
-  // 0.5.0 起启动器和 `dsh-desktop start` 都用 `--profile <名字>`，argv 里**没有**
-  // `web` 这个词。只认子命令的话，dsh-desktop stop 会拒绝停自己刚拉起的服务。
+  // 0.5.0 起启动器和 `dsh-lxi start` 都用 `--profile <名字>`，argv 里**没有**
+  // `web` 这个词。只认子命令的话，dsh-lxi stop 会拒绝停自己刚拉起的服务。
   const fake = path.join(dir, 'dsh')
   fs.writeFileSync(fake, 'setTimeout(() => {}, 20000)\n')
   const child = spawn(process.execPath, [fake, '--profile', 'web-dev', '--no-open'], { stdio: 'ignore' })

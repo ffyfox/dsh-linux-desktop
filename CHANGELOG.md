@@ -3,6 +3,35 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.6.0] - 2026-09-25
+
+**破坏性变更：包名、命令名与数据目录全部更换。**
+
+本插件做的是「把 `dsh web` 接进 Linux 桌面」，用 `integration` 描述比 `desktop` 准确；同时把 `dsh-desktop` 与 `dsh-linux-desktop` 这两个名字让给真正的桌面应用。命令名收短为 `dsh-lxi`。
+
+### 变更
+
+- **npm 包名**：`dsh-linux-desktop` → `dsh-linux-integration`。
+- **CLI 命令**：`dsh-desktop` → `dsh-lxi`。启动器 `dsh-desktop-app` → `dsh-lxi-app`；垫片落在 `~/.local/bin/dsh-lxi`。
+- **数据 / 配置 / 运行时目录**：`dsh-desktop` → `dsh-lxi`。即 `~/.config/dsh-lxi/`、`~/.local/share/dsh-lxi/`、`~/.cache/dsh-lxi-dev/`、`$XDG_RUNTIME_DIR/dsh-lxi/`。
+- **Hyprland / KWin 的规则名与标记块**：`dsh-desktop-*` → `dsh-lxi-*`。
+- **profile 补丁行**：`cordis.patch.yml` 的 `name:` 同步改为 `dsh-linux-integration`。行层按包自身 `package.json` 的 `name` 解析，不同步会让整行解析失败。
+
+### 升级
+
+旧路径**不会自动迁移**。装完新版本后重新执行一次：
+
+```bash
+dsh-lxi install --force
+```
+
+随后 `~/.config/dsh-desktop/` 与 `~/.local/share/dsh-desktop/` 可以删除；`~/.local/bin/` 下旧的 `dsh-desktop` 与 `dsh-desktop-app` 垫片也应一并清掉，否则会留下两个指向空气的命令。
+
+### 未变
+
+- 环境变量名保持原样：`DSH_DESKTOP_ROOT`、`DSH_DESKTOP_PROFILE`、`DSH_DESKTOP_PORT`、`DSH_DESKTOP_DEBUG`。
+- 桌面入口文件名 `dsh.desktop` 与图标名 `deepseek-harness` 保持原样。
+
 ## [0.5.1] - 2026-09-25
 
 把发布流程里剩下的机械步骤也收进命令，并堵上一个发布校验的漏口。
@@ -29,8 +58,8 @@
 
 ### 新增
 
-- **`profile` 配置项**：桌面图标启动哪个 dsh profile，默认 `web`（与 `dsh web` 等价）。启动器与 `dsh-desktop start` 统一改用 `dsh --profile <名字>` 拉起。
-- **`devProfile` 配置项**：非空时，桌面入口右键菜单多一个「以开发配置运行」。该动作自动带上三个环境变量 —— `DSH_DESKTOP_PROFILE`（切 profile）、`DSH_DESKTOP_PORT`（`port + 1`）、`DSH_DESKTOP_ROOT`（`$XDG_CACHE_HOME/dsh-desktop-dev` 沙箱）。
+- **`profile` 配置项**：桌面图标启动哪个 dsh profile，默认 `web`（与 `dsh web` 等价）。启动器与 `dsh-lxi start` 统一改用 `dsh --profile <名字>` 拉起。
+- **`devProfile` 配置项**：非空时，桌面入口右键菜单多一个「以开发配置运行」。该动作自动带上三个环境变量 —— `DSH_DESKTOP_PROFILE`（切 profile）、`DSH_DESKTOP_PORT`（`port + 1`）、`DSH_DESKTOP_ROOT`（`$XDG_CACHE_HOME/dsh-lxi-dev` 沙箱）。
 - 启动脚本认这三个变量覆盖；设了 `DSH_DESKTOP_ROOT` 时按 `paths.js` 的同一套规则重算运行时目录与日志路径。
 
 ### 为什么
@@ -43,7 +72,7 @@
 
 ### 修正
 
-- **`isDshWebProcess` 原先只认 `web` 子命令。** 拉起命令改成 `--profile <名字>` 后 argv 里不再有 `web`，`dsh-desktop stop` 会认不出自己刚拉起的服务并拒绝停它。现在两种写法都认，且不接受 `--profile` 后面跟的是另一个选项。
+- **`isDshWebProcess` 原先只认 `web` 子命令。** 拉起命令改成 `--profile <名字>` 后 argv 里不再有 `web`，`dsh-lxi stop` 会认不出自己刚拉起的服务并拒绝停它。现在两种写法都认，且不接受 `--profile` 后面跟的是另一个选项。
 
 ### 发布前校验
 
@@ -74,7 +103,7 @@
   ```
   Failed to load plugins
   web boot: 2 entries did not activate
-  dsh-linux-desktop: pending (waiting for service: settingsScope)
+  dsh-linux-integration: pending (waiting for service: settingsScope)
   ```
 
   两处改动：
@@ -86,18 +115,18 @@
 
   另补一道兜底：两个服务都没有时安静跳过、不注册卡片，而不是抛出去 —— 客户端插件行抛异常会连累整个 web 界面。
 
-- **0.4.1 发布出去的那份 README 里有两句话不再成立**：「尚未发布到 npm」和「`add dsh-linux-desktop`（按包名）暂不可用」。npm 页面渲染的就是包里的 README，所以这两句只能靠一个新版本才能修掉 —— 这正是「发版前先改文档」的原因。
+- **0.4.1 发布出去的那份 README 里有两句话不再成立**：「尚未发布到 npm」和「`add dsh-linux-integration`（按包名）暂不可用」。npm 页面渲染的就是包里的 README，所以这两句只能靠一个新版本才能修掉 —— 这正是「发版前先改文档」的原因。
 
 ### 新增
 
-- **npm 发布**：`dsh plugin --profile web add dsh-linux-desktop`。这是最省事的一条安装路径 —— 不克隆仓库，装完即用。已在隔离的 `DSH_HOME` 中实测通过，`dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`。安装一节现在按 **npm → GitHub → 本地检出** 排列，三种来源都实测过。
+- **npm 发布**：`dsh plugin --profile web add dsh-linux-integration`。这是最省事的一条安装路径 —— 不克隆仓库，装完即用。已在隔离的 `DSH_HOME` 中实测通过，`dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`。安装一节现在按 **npm → GitHub → 本地检出** 排列，三种来源都实测过。
 - `package.json` 补上 `author` / `homepage` / `bugs` 三个字段 —— npm 页面上原本这几项都是空的。
 - **发布前校验新增第 8 项：会进包的文件有未提交改动时拒绝发布。** `npm publish` 打包的是**工作区**而不是某个提交 —— 0.4.1 就是这么把一处未提交的本地改动带进包的（发布后逐文件比对才发现包里 `src/client.js` 比 tag 多一个 hunk）。
 - 冒烟测试新增 4 项，覆盖上面那条服务改名兼容性；用例总数 117 → 121。新增的用例把 `src/client.js` 当浏览器 bundle 真跑一遍（假 `window` + 假 `require`），因此客户端插件行第一次有了测试。
 
 ### 实测记录
 
-- 三种来源各自跑通：按包名（走 registry，秒级）、`github:ffyfox/dsh-linux-desktop`（要克隆整个仓库，分钟级）、本地 `link:`。
+- 三种来源各自跑通：按包名（走 registry，秒级）、`github:ffyfox/dsh-linux-integration`（要克隆整个仓库，分钟级）、本地 `link:`。
 - 发布过程本身踩了两个坑，记在这里以免下次再踩：
   - `NODE_OPTIONS=--use-env-proxy`（Node 26 的内建代理）会让 npm 的 fetch 直接失败 —— 表现为 `npm login` 卡在 `web login before first POST` 一动不动。
   - 本机 `~/.npmrc` 的默认 registry 是 `registry.npmmirror.com`（只读镜像），发布必须显式加 `--registry=https://registry.npmjs.org`。
@@ -108,7 +137,7 @@
 
 ### 新增
 
-- **公开安装方式**：`dsh plugin --profile web add github:ffyfox/dsh-linux-desktop`。这是本插件第一个不需要克隆仓库的安装方式，也是社区通用的装法。已在隔离的 `DSH_HOME` 中实测通过 —— `dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`，不需要手工编辑 `package.json`。README 同时给出了锁定版本的写法（`#v0.4.1`）。
+- **公开安装方式**：`dsh plugin --profile web add github:ffyfox/dsh-linux-integration`。这是本插件第一个不需要克隆仓库的安装方式，也是社区通用的装法。已在隔离的 `DSH_HOME` 中实测通过 —— `dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`，不需要手工编辑 `package.json`。README 同时给出了锁定版本的写法（`#v0.4.1`）。
 
 ### 修正
 
@@ -130,7 +159,7 @@
 ### 新增
 
 - **GNOME 尺寸现实检查**（`src/gnome.js`，**只读**）
-  - `dsh-desktop install` / `status` / `doctor` 在 GNOME 上新增 `gnome-window-size` 一项：读一次逻辑工作区（`gdctl show`）与 `org.gnome.mutter auto-maximize`，判断配置的窗口尺寸会不会被 Mutter 的 auto-maximize 吃掉。
+  - `dsh-lxi install` / `status` / `doctor` 在 GNOME 上新增 `gnome-window-size` 一项：读一次逻辑工作区（`gdctl show`）与 `org.gnome.mutter auto-maximize`，判断配置的窗口尺寸会不会被 Mutter 的 auto-maximize 吃掉。
   - 超过阈值时升级为 `warning`，并给出算出来的真实占比；`doctor` 附带两种解法。
   - 设置页「窗口宽度/高度」的说明文字补上了这条注意事项。
 
@@ -216,7 +245,7 @@
   - 一并修掉一个布局细节：单元格里的输入框必须显式 `box-sizing:border-box`。`.dsld_input` 有 12px 左右内边距，默认的 `content-box` 下 `width:100%` 会连内边距一起算出去，两个输入框会横向重叠 18px（实测单元格 257px，输入框却渲染成 283px）。
 
 - **关窗通知的第一句不够醒目**（`src/assets/launcher.sh.tpl`）
-  - 「dsh web 服务仍在后台运行」改为走**通知标题**并去掉句号，第二句「停止：dsh-desktop stop」原样留在正文。
+  - 「dsh web 服务仍在后台运行」改为走**通知标题**并去掉句号，第二句「停止：dsh-lxi stop」原样留在正文。
   - 之所以用标题而不是正文标记：FreeDesktop 通知的正文标记只支持 `<b>/<i>/<u>/<a>/<img>`，**没有字号**；唯一能让一段文字「较大且较粗」的字段就是 summary，KDE Plasma、GNOME、dunst 都会把标题渲染得比正文更大更粗。
 
 - **仓库根目录的 `whale-girl.png` 已删除**，并清理了唯一一处指向它的引用（Dolphin 的 `.directory` 文件夹图标设置）。`.directory` 记录的是本机绝对路径，已加进 `.gitignore`。进包的那份 `src/assets/whale-girl.png`（512×512）不受影响。
@@ -224,7 +253,7 @@
 ### 已知限制
 
 - 设置页卡片需要 `@deepseek-ai/schemastery`。本地 `link:` 安装且找不到该包时，卡片不会出现（桌面集成本身照常工作）。
-- 卡片暂不提供安装状态的只读展示（app_id、探测到的浏览器、启动器路径），仍由 `dsh-desktop status` / `doctor` 负责。
+- 卡片暂不提供安装状态的只读展示（app_id、探测到的浏览器、启动器路径），仍由 `dsh-lxi status` / `doctor` 负责。
 
 ## [0.1.0] - 2026-09-20
 
@@ -238,7 +267,7 @@
   - 进程退出时清理运行时状态，且通过 pid 校验避免误删新进程刚写下的状态。
   - 每次 `dsh web` 启动幂等自愈桌面集成；所有副作用包在 try/catch 中，绝不向上抛。
 
-- **桌面启动器**（`src/assets/launcher.sh.tpl`，安装时生成到 `~/.local/bin/dsh-desktop-app`）
+- **桌面启动器**（`src/assets/launcher.sh.tpl`，安装时生成到 `~/.local/bin/dsh-lxi-app`）
   - `flock` 单实例锁，保证只有一个实例管理服务生命周期。
   - 端口探测把 401 也算作「服务在监听」。
   - 未在监听时用 `setsid` 静默拉起 `dsh web --no-open`，并记录「是我启的」。
@@ -255,12 +284,12 @@
   - 刷新 `update-desktop-database` / `kbuildsycoca6` / `gtk-update-icon-cache` 缓存，失败只记警告。
   - `status` 诊断与 `uninstall` 幂等清理。
 
-- **CLI**（`dsh-desktop`）：`install` / `uninstall` / `status` / `doctor` / `config` / `set` / `open` / `stop` / `restart` / `runtime`。
-  - 安装时在 `~/.local/bin/dsh-desktop` 写入 CLI 垫片。该 bin 本身位于 profile 的 `node_modules/.bin/`，**不在用户 PATH 上** —— 没有垫片的话 README 里那些命令根本没法照做。
+- **CLI**（`dsh-lxi`）：`install` / `uninstall` / `status` / `doctor` / `config` / `set` / `open` / `stop` / `restart` / `runtime`。
+  - 安装时在 `~/.local/bin/dsh-lxi` 写入 CLI 垫片。该 bin 本身位于 profile 的 `node_modules/.bin/`，**不在用户 PATH 上** —— 没有垫片的话 README 里那些命令根本没法照做。
   - `stop` / `restart` 面向「用户明确发起」的场景。启动器只能管自己启的服务（安全底线），所以需要一个由用户主动触发、能停掉任意 dsh web 的入口。它们仍会读 `/proc/<pid>/cmdline` 校验目标确实是 dsh web，不是则拒绝并提示 `--force`。
   - 沙箱模式（`--root` / `DSH_DESKTOP_ROOT`）下禁用「按端口找进程」这条退路 —— 端口不是沙箱化的，否则沙箱里的 stop/restart 会误杀真实环境中正在服务的 dsh web（开发中真实踩到过）。
 
-- **配置**：`~/.config/dsh-desktop/config.json`，支持 host / port / 窗口尺寸 / 浏览器 / profileMode / autoInstall / manageKwinRules 等，非法值回落到默认并给出警告。
+- **配置**：`~/.config/dsh-lxi/config.json`，支持 host / port / 窗口尺寸 / 浏览器 / profileMode / autoInstall / manageKwinRules 等，非法值回落到默认并给出警告。
 
 - **沙箱模式**：`--root <目录>` 或 `DSH_DESKTOP_ROOT`，重定向全部读写（含 HOME 与所有 XDG_* 路径），便于隔离开发与测试。
 

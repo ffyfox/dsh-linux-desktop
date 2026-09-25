@@ -108,7 +108,7 @@ export function verifyReleaseState({ version, porcelain, describedTag }) {
 }
 
 /**
- * 推导快照目录的默认位置：`$XDG_DATA_HOME/dsh-desktop/snapshots`，
+ * 推导快照目录的默认位置：`$XDG_DATA_HOME/dsh-lxi/snapshots`，
  * 没设 XDG_DATA_HOME 时退回 `$HOME/.local/share/...`。
  *
  * 按 src/paths.js 里 xdgDataHome 的规则推导，但**不 import 它** —— 那里掺了沙箱
@@ -118,7 +118,7 @@ export function verifyReleaseState({ version, porcelain, describedTag }) {
 function defaultDest(env = process.env) {
   const dataHome =
     env.XDG_DATA_HOME && env.XDG_DATA_HOME.trim() ? env.XDG_DATA_HOME : path.join(env.HOME || os.homedir(), '.local', 'share')
-  return path.join(dataHome, 'dsh-desktop', 'snapshots')
+  return path.join(dataHome, 'dsh-lxi', 'snapshots')
 }
 
 const MAX_BUFFER = 64 * 1024 * 1024

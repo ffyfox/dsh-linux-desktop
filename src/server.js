@@ -9,11 +9,11 @@
  *   2. `profileMode: shared` 下启动器自己起的服务，会因为窗口「移交给既有浏览器
  *      进程」而无法感知关闭时刻，最终留下一个孤儿进程。
  *
- * 所以需要一组「用户主动发起的」启停能力：`dsh-desktop stop` / `restart`。
+ * 所以需要一组「用户主动发起的」启停能力：`dsh-lxi stop` / `restart`。
  * 它们和启动器的区别是**意图来源**：启动器是自动的，必须保守；这两个命令是
  * 用户明确要求的，可以动手，但仍然要先确认目标进程真的是 dsh web。
  *
- * @module dsh-linux-desktop/server
+ * @module dsh-linux-integration/server
  */
 
 import { execFileSync, spawn } from 'node:child_process'
@@ -47,8 +47,8 @@ export function readProcessCommand(pid) {
  *   ['node', '/home/<user>/.npm-global/bin/dsh', 'web', '--no-open', '--port', '3080']
  *   ['node', '/home/<user>/.npm-global/bin/dsh', '--profile', 'web-dev', '--no-open', …]
  *
- * 第二种是 0.5.0 起启动器与 `dsh-desktop start` 的统一写法。它**不含 `web` 这个词** ——
- * 只认子命令的话，`dsh-desktop stop` 会认不出自己刚拉起的服务并拒绝停它。
+ * 第二种是 0.5.0 起启动器与 `dsh-lxi start` 的统一写法。它**不含 `web` 这个词** ——
+ * 只认子命令的话，`dsh-lxi stop` 会认不出自己刚拉起的服务并拒绝停它。
  *
  * @param {number} pid
  * @returns {{ ok: boolean, reason: string, command: string | null }}
@@ -157,7 +157,7 @@ export function resolveServerTarget({
     return {
       ok: false,
       reason: `没有找到监听端口 ${port} 的进程，也没有对应的运行时状态`,
-      hint: '可能本来就没有在跑；可以用 dsh-desktop status 确认。',
+      hint: '可能本来就没有在跑；可以用 dsh-lxi status 确认。',
     }
   }
 

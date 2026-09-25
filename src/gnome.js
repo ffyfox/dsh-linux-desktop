@@ -30,7 +30,7 @@
  * 但那是**全局**设置（影响所有应用），不是「针对这个窗口的规则」，所以本模块只
  * 把它写进建议文案，绝不代用户修改。
  *
- * @module dsh-linux-desktop/gnome
+ * @module dsh-linux-integration/gnome
  */
 
 import { execFileSync } from 'node:child_process'

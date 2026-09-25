@@ -26,14 +26,14 @@ import { packFromTag } from './pack-from-tag.mjs'
 import { REPO_ROOT } from './shipped-paths.mjs'
 
 const ROOT = REPO_ROOT
-const PACKAGE_NAME = 'dsh-linux-desktop'
+const PACKAGE_NAME = 'dsh-linux-integration'
 
 /**
  * 在依赖表里找出「指向本包」的那一项，返回键名；一个都没命中返回 null；命中多个抛错。
  *
  * 三种命中方式对应本项目真实出现过的三种写法：
  *   - 键等于包名            —— 依赖项名就是它，值随便是什么（含 registry 版本号）
- *   - `file:...dsh-linux-desktop-<版本>.tgz` —— 指向一个本地快照
+ *   - `file:...dsh-linux-integration-<版本>.tgz` —— 指向一个本地快照
  *   - `link:...` 指向本仓库根目录 —— 开发时的链接安装
  *
  * 纯函数（只依赖入参），因为「命中 0 个 / 命中 1 个 / 命中多个」这三种分支都要测，
@@ -53,8 +53,8 @@ export function findPackageDependency(deps, { packageName, repoRoot, profileDir 
     }
     if (typeof value !== 'string') continue
 
-    // `.*` 允许中间夹目录（file:./snapshots/dsh-linux-desktop-1.2.3.tgz 也算）。
-    if (/^file:.*dsh-linux-desktop-.*\.tgz$/.test(value)) {
+    // `.*` 允许中间夹目录（file:./snapshots/dsh-linux-integration-1.2.3.tgz 也算）。
+    if (/^file:.*dsh-linux-integration-.*\.tgz$/.test(value)) {
       hits.push(key)
       continue
     }

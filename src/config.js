@@ -1,10 +1,10 @@
 /**
  * 配置的默认值、读取、校验与写回。
  *
- * 配置只有一个来源：`$XDG_CONFIG_HOME/dsh-desktop/config.json`。CLI 和 dsh web
+ * 配置只有一个来源：`$XDG_CONFIG_HOME/dsh-lxi/config.json`。CLI 和 dsh web
  * 里的宿主插件都读同一个文件，所以「改一次，两处生效」，不存在两份真相。
  *
- * @module dsh-linux-desktop/config
+ * @module dsh-linux-integration/config
  */
 
 import fs from 'node:fs'

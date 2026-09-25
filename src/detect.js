@@ -4,7 +4,7 @@
  * 全部函数都是**纯函数 + 可注入 env/PATH**，不依赖真实系统状态，因此可以在
  * 测试里喂任意组合，验证「KDE / GNOME / Hyprland / 无桌面会话」等分支。
  *
- * @module dsh-linux-desktop/detect
+ * @module dsh-linux-integration/detect
  */
 
 import fs from 'node:fs'

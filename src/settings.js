@@ -10,7 +10,7 @@
  * ## 分层（由下到上）
  *
  * 1. schema 默认值（本文件）；
- * 2. `~/.config/dsh-desktop/config.json` 的当前内容 —— 作为 composition base 传进去，
+ * 2. `~/.config/dsh-lxi/config.json` 的当前内容 —— 作为 composition base 传进去，
  *    因此 0.1.x 就存在的配置文件**继续生效**，不会被这次改动作废；
  * 3. `settings.yaml` 里的用户覆盖 —— 设置页卡片写的就是这一层。
  *
@@ -26,7 +26,7 @@
  * 加载；加载不到就安静降级成「没有设置页卡片」，而不是让插件行加载失败、连运行时
  * 状态都发布不了。
  *
- * @module dsh-linux-desktop/settings
+ * @module dsh-linux-integration/settings
  */
 
 import fs from 'node:fs'

@@ -1,7 +1,7 @@
 /**
  * FreeDesktop 桌面入口（`.desktop`）与 Wayland `app_id` 映射。
  *
- * @module dsh-linux-desktop/desktop-entry
+ * @module dsh-linux-integration/desktop-entry
  */
 
 /**
@@ -72,8 +72,8 @@ export function renderDesktopEntry({
   version = '0.0.0',
 }) {
   const lines = []
-  lines.push('# 由 dsh-linux-desktop 生成，请勿手工编辑 ——')
-  lines.push(`# 版本 ${version}；重新生成请执行：dsh-desktop install --force`)
+  lines.push('# 由 dsh-linux-integration 生成，请勿手工编辑 ——')
+  lines.push(`# 版本 ${version}；重新生成请执行：dsh-lxi install --force`)
   lines.push('[Desktop Entry]')
   lines.push('Version=1.0')
   lines.push('Type=Application')
@@ -144,8 +144,8 @@ export function renderDesktopEntry({
  */
 export function renderAliasEntry(mainEntryContent) {
   return mainEntryContent.replace(
-    '# 由 dsh-linux-desktop 生成，请勿手工编辑 ——',
-    '# 由 dsh-linux-desktop 生成，请勿手工编辑 ——\n# 这是 Wayland app_id 别名入口，内容与 dsh.desktop 完全一致。',
+    '# 由 dsh-linux-integration 生成，请勿手工编辑 ——',
+    '# 由 dsh-linux-integration 生成，请勿手工编辑 ——\n# 这是 Wayland app_id 别名入口，内容与 dsh.desktop 完全一致。',
   )
 }
 

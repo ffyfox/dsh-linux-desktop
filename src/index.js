@@ -1,5 +1,5 @@
 /**
- * `dsh-linux-desktop` 的宿主插件行。
+ * `dsh-linux-integration` 的宿主插件行。
  *
  * 这一行跑在 `dsh web` 进程内部，只做三件事：
  *
@@ -19,7 +19,7 @@
  *   - 所有副作用都包在 try/catch 里，任何一步失败都只写日志，绝不向上抛。
  *   - 非 Linux 直接返回。
  *
- * @module dsh-linux-desktop
+ * @module dsh-linux-integration
  */
 
 import { connectHost, readConfig } from './config.js'
@@ -108,7 +108,7 @@ export function apply(ctx) {
       const result = install({ paths, config, env, quiet: true })
       if (!result.ok) {
         const failure = result.steps.find((step) => step.status === 'failed')
-        warn(`桌面集成自动安装未完成：${failure?.detail ?? '原因未知'}（可运行 dsh-desktop doctor 诊断）`)
+        warn(`桌面集成自动安装未完成：${failure?.detail ?? '原因未知'}（可运行 dsh-lxi doctor 诊断）`)
         return
       }
       log(result.changed ? '桌面集成已安装 / 更新完成' : '桌面集成已是最新')

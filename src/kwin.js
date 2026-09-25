@@ -8,7 +8,7 @@
  * 自己那一段和 `[General]` 的两行 —— 用户手写的其它规则（比如给桌面宠物加
  * `skiptaskbar`）必须一字不差地留着。
  *
- * @module dsh-linux-desktop/kwin
+ * @module dsh-linux-integration/kwin
  */
 
 import { execFileSync } from 'node:child_process'

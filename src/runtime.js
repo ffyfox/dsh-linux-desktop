@@ -11,9 +11,9 @@
  *
  * 同时写两份：
  *   - `runtime.env`：`key=value` 纯文本，专供 shell 启动器解析（不引入 jq 依赖）。
- *   - `runtime.json`：结构化版本，供 `dsh-desktop status` 等工具读取。
+ *   - `runtime.json`：结构化版本，供 `dsh-lxi status` 等工具读取。
  *
- * @module dsh-linux-desktop/runtime
+ * @module dsh-linux-integration/runtime
  */
 
 import fs from 'node:fs'

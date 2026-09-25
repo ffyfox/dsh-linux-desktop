@@ -9,7 +9,7 @@
  * 3. **不抛错**：所有副作用都包在 try/catch 里，单步失败只记进报告，绝不把
  *    dsh web 的启动拖挂。
  *
- * @module dsh-linux-desktop/installer
+ * @module dsh-linux-integration/installer
  */
 
 import { execFileSync } from 'node:child_process'
@@ -396,14 +396,14 @@ export function install(options = {}) {
   }
 
   // ---- CLI 垫片 ---------------------------------------------------------
-  // `dsh-desktop` 装完在 profile 的 node_modules/.bin 里，不在用户 PATH 上。
+  // `dsh-lxi` 装完在 profile 的 node_modules/.bin 里，不在用户 PATH 上。
   // 写一个把绝对路径固化的垫片到 ~/.local/bin，命令才真的能用。
   try {
     const shim = [
       '#!/usr/bin/env bash',
-      '# 由 dsh-linux-desktop 生成，请勿手工编辑。',
-      `# 重新生成请执行：dsh-desktop install --force`,
-      `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(HERE, '..', 'bin', 'dsh-desktop.js'))} "$@"`,
+      '# 由 dsh-linux-integration 生成，请勿手工编辑。',
+      `# 重新生成请执行：dsh-lxi install --force`,
+      `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(HERE, '..', 'bin', 'dsh-lxi.js'))} "$@"`,
       '',
     ].join('\n')
     const result = writeManagedFile(paths.cliShimFile, shim, { mode: 0o755 })
@@ -721,7 +721,7 @@ export function uninstall(options = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * 诊断当前安装状态，供 `dsh-desktop status` / `doctor` 使用。
+ * 诊断当前安装状态，供 `dsh-lxi status` / `doctor` 使用。
  *
  * @param {object} [options]
  * @returns {object} 结构化报告。

@@ -1,6 +1,6 @@
 {
-  "name": "dsh-linux-desktop",
-  "version": "0.5.1",
+  "name": "dsh-linux-integration",
+  "version": "0.6.0",
   "description": "DeepSeek Harness 的 Linux 原生桌面集成：XDG 桌面入口、纯净无边框独立窗口，以及由自己启动的服务随窗口关闭而停止的生命周期管理。",
   "type": "module",
   "license": "MIT",
@@ -12,7 +12,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "dsh-desktop": "bin/dsh-desktop.js"
+    "dsh-lxi": "bin/dsh-lxi.js"
   },
   "files": [
     "src",
@@ -36,7 +36,7 @@
     "snapshot": "node scripts/snapshot.mjs",
     "hooks:install": "git config core.hooksPath .githooks && echo '已启用 .githooks/ —— 提交前会自动跑 npm run check:pre-commit；急事用 git commit --no-verify 跳过'",
     "prepublishOnly": "node scripts/prepublish-check.mjs --release",
-    "status": "node bin/dsh-desktop.js status"
+    "status": "node bin/dsh-lxi.js status"
   },
   "dsh": {
     "bundle": {
@@ -79,11 +79,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ffyfox/dsh-linux-desktop.git"
+    "url": "git+https://github.com/ffyfox/dsh-linux-integration.git"
   },
   "author": "ffyfox",
-  "homepage": "https://github.com/ffyfox/dsh-linux-desktop#readme",
+  "homepage": "https://github.com/ffyfox/dsh-linux-integration#readme",
   "bugs": {
-    "url": "https://github.com/ffyfox/dsh-linux-desktop/issues"
+    "url": "https://github.com/ffyfox/dsh-linux-integration/issues"
   }
 }

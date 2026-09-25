@@ -1,4 +1,4 @@
-# dsh-linux-desktop
+# dsh-linux-integration
 
 > 让 DeepSeek Harness 在 Linux 桌面上像一个原生应用：从程序启动器点开、独立无边框窗口，以及由它启动的服务随窗口关闭而停止。
 
@@ -32,7 +32,7 @@ Firefox 不受支持：Firefox 已移除 SSB（Site Specific Browser），无法
 ## 安装
 
 ```bash
-dsh plugin --profile web add dsh-linux-desktop
+dsh plugin --profile web add dsh-linux-integration
 ```
 
 安装后重启一次 `dsh web`。
@@ -40,20 +40,20 @@ dsh plugin --profile web add dsh-linux-desktop
 想跟着 `main` 走就换成从 GitHub 装：
 
 ```bash
-dsh plugin --profile web add github:ffyfox/dsh-linux-desktop
+dsh plugin --profile web add github:ffyfox/dsh-linux-integration
 ```
 
 两种来源都能锁定版本：
 
 ```bash
-dsh plugin --profile web add dsh-linux-desktop@0.4.2
-dsh plugin --profile web add github:ffyfox/dsh-linux-desktop#v0.4.2
+dsh plugin --profile web add dsh-linux-integration@0.4.2
+dsh plugin --profile web add github:ffyfox/dsh-linux-integration#v0.4.2
 ```
 
 改代码时改用本地检出：
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-linux-desktop
+dsh plugin --profile web add /path/to/dsh-linux-integration
 ```
 
 > **三种来源都实测过**，各自在隔离的 `DSH_HOME` 里跑通，装完 `dsh` 会自动把这一行注册进 profile 的 `dsh.profile.bundles`，不需要手工编辑 `package.json`。按包名走 registry 最快；从 GitHub 装要克隆整个仓库，慢一个数量级。
@@ -85,38 +85,38 @@ dsh plugin --profile web add /path/to/dsh-linux-desktop
 
 ## 命令
 
-安装时会写入一个 CLI 垫片到 `~/.local/bin/dsh-desktop`，因此下列命令可以直接执行。
+安装时会写入一个 CLI 垫片到 `~/.local/bin/dsh-lxi`，因此下列命令可以直接执行。
 
 | 命令 | 作用 |
 |---|---|
-| `dsh-desktop install` | 安装或修复桌面集成（幂等） |
-| `dsh-desktop uninstall` | 移除桌面集成，保留配置与备份 |
-| `dsh-desktop status` | 查看安装状态与健康检查 |
-| `dsh-desktop doctor` | 诊断并给出修复建议 |
-| `dsh-desktop config` | 查看配置文件位置与内容 |
-| `dsh-desktop set <键> <值>` | 修改一项配置并重新安装 |
-| `dsh-desktop open` | 以独立窗口打开 dsh，等价于点击桌面图标 |
-| `dsh-desktop stop` | 停止正在运行的 `dsh web` |
-| `dsh-desktop restart` | 重启 `dsh web` |
-| `dsh-desktop runtime` | 查看当前 `dsh web` 的运行时状态 |
+| `dsh-lxi install` | 安装或修复桌面集成（幂等） |
+| `dsh-lxi uninstall` | 移除桌面集成，保留配置与备份 |
+| `dsh-lxi status` | 查看安装状态与健康检查 |
+| `dsh-lxi doctor` | 诊断并给出修复建议 |
+| `dsh-lxi config` | 查看配置文件位置与内容 |
+| `dsh-lxi set <键> <值>` | 修改一项配置并重新安装 |
+| `dsh-lxi open` | 以独立窗口打开 dsh，等价于点击桌面图标 |
+| `dsh-lxi stop` | 停止正在运行的 `dsh web` |
+| `dsh-lxi restart` | 重启 `dsh web` |
+| `dsh-lxi runtime` | 查看当前 `dsh web` 的运行时状态 |
 
 `install` 的选项：`--force`、`--port`、`--host`、`--size`、`--browser`、`--profile-mode`、`--no-kwin`、`--hyprland`、`--no-auto-install`。
 `stop` 与 `restart` 的选项：`--force`。
 通用选项：`--root <目录>`（沙箱模式，把所有读写重定向到该目录）、`--json`。
 
-`dsh-desktop` 这个 bin 安装在 profile 的 `node_modules/.bin/` 下，不在 `PATH` 上。垫片把绝对路径固化下来；每次安装或自愈都会刷新它。不使用垫片的等价写法是：
+`dsh-lxi` 这个 bin 安装在 profile 的 `node_modules/.bin/` 下，不在 `PATH` 上。垫片把绝对路径固化下来；每次安装或自愈都会刷新它。不使用垫片的等价写法是：
 
 ```bash
-dsh plugin --profile web exec dsh-desktop <子命令>
+dsh plugin --profile web exec dsh-lxi <子命令>
 ```
 
 `stop` 与 `restart` 是你明确发起的操作，因此会执行，但仍会先读取 `/proc/<pid>/cmdline` 校验目标进程确实是 `dsh web`，校验失败则拒绝并提示 `--force`。
 
-> `dsh-desktop runtime` 会明文打印带 token 的完整地址。启动器的调试日志会把 token 打码为 `<REDACTED>`，但这个命令不会 —— 它输出的地址本身就是它的用途。注意不要把它的输出贴到公开场合。
+> `dsh-lxi runtime` 会明文打印带 token 的完整地址。启动器的调试日志会把 token 打码为 `<REDACTED>`，但这个命令不会 —— 它输出的地址本身就是它的用途。注意不要把它的输出贴到公开场合。
 
 ## 配置
 
-配置文件位于 `~/.config/dsh-desktop/config.json`，首次安装时自动生成。
+配置文件位于 `~/.config/dsh-lxi/config.json`，首次安装时自动生成。
 
 | 键 | 说明 |
 |---|---|
@@ -136,11 +136,11 @@ dsh plugin --profile web exec dsh-desktop <子命令>
 ```bash
 # 1. 在 Web 设置页里改：插件 → 插件配置 → 桌面集成。保存后立即生效。
 # 2. 直接编辑后重新安装
-$EDITOR ~/.config/dsh-desktop/config.json
-dsh plugin --profile web exec dsh-desktop install
+$EDITOR ~/.config/dsh-lxi/config.json
+dsh plugin --profile web exec dsh-lxi install
 
 # 3. 或用 CLI 修改，会自动重新安装
-dsh plugin --profile web exec dsh-desktop set window 1400x900
+dsh plugin --profile web exec dsh-lxi set window 1400x900
 ```
 
 ### 设置页卡片与 config.json 的关系
@@ -182,15 +182,15 @@ Chrome 已在运行时执行 `chrome --app=URL` 会把窗口移交给既有浏�
 |---|---|
 | `DSH_DESKTOP_PROFILE` | 切到 `devProfile` 指定的 profile。 |
 | `DSH_DESKTOP_PORT` | 换成 `port + 1`。不换端口的话，第二套的服务探测会命中第一套并直接复用它 —— 右键点开看到的还是日常那套。 |
-| `DSH_DESKTOP_ROOT` | 沙箱根目录（`$XDG_CACHE_HOME/dsh-desktop-dev`）。**这一项不能省**：插件的自动安装会写 `~/.local/bin` 与 `~/.local/share/applications`，而这些**不随 profile 分家**。没有沙箱，用开发版代码启动一次就会覆盖掉日常那套的启动器与桌面入口。 |
+| `DSH_DESKTOP_ROOT` | 沙箱根目录（`$XDG_CACHE_HOME/dsh-lxi-dev`）。**这一项不能省**：插件的自动安装会写 `~/.local/bin` 与 `~/.local/share/applications`，而这些**不随 profile 分家**。没有沙箱，用开发版代码启动一次就会覆盖掉日常那套的启动器与桌面入口。 |
 
 三个变量都能在命令行上手动覆盖，所以不用右键动作也可以这样起开发那套：
 
 ```bash
-DSH_DESKTOP_ROOT=~/.cache/dsh-desktop-dev dsh --profile web-dev --no-open --port 3081
+DSH_DESKTOP_ROOT=~/.cache/dsh-lxi-dev dsh --profile web-dev --no-open --port 3081
 ```
 
-`dsh-desktop` 的 `start` / `restart` 走 `profile` 指定的那套；`stop` 按进程命令行识别服务，两种写法（`dsh web` 与 `dsh --profile <名字>`）都认。
+`dsh-lxi` 的 `start` / `restart` 走 `profile` 指定的那套；`stop` 按进程命令行识别服务，两种写法（`dsh web` 与 `dsh --profile <名字>`）都认。
 
 ## Hyprland 与窗口尺寸
 
@@ -201,14 +201,14 @@ Hyprland 是平铺合成器，而「固定窗口尺寸」和「平铺」天然�
 | 不托管（**默认**） | 窗口按平铺布局铺满工作区。此时 `window` 里的宽高**不起作用** —— 平铺下浏览器传的 `--window-size` 会被合成器忽略。 |
 | 托管 | 强制该窗口浮动，并使用 `window` 里的宽高。 |
 
-默认关闭是刻意的：选了平铺 WM 的用户就是要平铺，插件不该擅自把它改成浮动。想要固定尺寸就在设置页打开「托管 Hyprland 窗口规则」，或用 `dsh-desktop install --hyprland`。
+默认关闭是刻意的：选了平铺 WM 的用户就是要平铺，插件不该擅自把它改成浮动。想要固定尺寸就在设置页打开「托管 Hyprland 窗口规则」，或用 `dsh-lxi install --hyprland`。
 
 规则会被内联进你的 Hyprland 配置，并用注释标记包起来：
 
 ```ini
-# dsh-desktop begin
+# dsh-lxi begin
 windowrule = match:class ^(chrome-127\.0\.0\.1__-Default)$, float on, size 1200 750
-# dsh-desktop end
+# dsh-lxi end
 ```
 
 Hyprland 0.56 起全新安装生成的是 Lua 格式的 `hyprland.lua`，老用户升级上来的仍是 `hyprland.conf`；插件会按实际生效的那一份写入对应语法（两者同时存在时 `.lua` 优先，与 Hyprland 自身行为一致）。
@@ -236,7 +236,7 @@ GNOME 是堆叠式（浮动）窗口管理器 —— 和 Hyprland 正好相反�
 
 Mutter 默认开启 `org.gnome.mutter auto-maximize`：**窗口面积超过工作区约 80% 时直接把它最大化，请求的尺寸被丢弃。**
 
-所以 `dsh-desktop status` / `doctor` 会读一次逻辑工作区（**只读**，用 `gdctl show`），并在你的 `window` 尺寸会触发这条规则时告警：
+所以 `dsh-lxi status` / `doctor` 会读一次逻辑工作区（**只读**，用 `gdctl show`），并在你的 `window` 尺寸会触发这条规则时告警：
 
 ```
 ! gnome-window-size    窗口 2400x1500 占逻辑工作区 2560x1600 的 88%，超过 80% —— GNOME 会把它最大化，尺寸设置将不生效。
@@ -256,11 +256,11 @@ Wayland 没有让客户端给自己定位的协议，GNOME 用自己的摆放算
 ## 卸载
 
 ```bash
-dsh plugin --profile web exec dsh-desktop uninstall
+dsh plugin --profile web exec dsh-lxi uninstall
 ```
 
 移除启动脚本、`dsh.desktop`、app_id 别名入口、图标与 KWin 规则。
-保留 `~/.config/dsh-desktop/`，其中包含配置与备份。
+保留 `~/.config/dsh-lxi/`，其中包含配置与备份。
 
 ## 兼容性
 
@@ -274,29 +274,29 @@ dsh plugin --profile web exec dsh-desktop uninstall
 
 已验证环境：Arch Linux、KDE Plasma 6、Wayland、200% 缩放（逻辑分辨率 1536×960）。
 
-上表中标注「未验证」的条目来自架构推断，尚未在对应环境中实测。若你在其中某个环境上运行，`dsh-desktop doctor` 的输出可作为验证结果。
+上表中标注「未验证」的条目来自架构推断，尚未在对应环境中实测。若你在其中某个环境上运行，`dsh-lxi doctor` 的输出可作为验证结果。
 
 ## 故障排查
 
 ```bash
-dsh plugin --profile web exec dsh-desktop doctor
+dsh plugin --profile web exec dsh-lxi doctor
 ```
 
 | 现象 | 原因与处理 |
 |---|---|
-| 任务栏显示黄色圆圈加白色 W | app_id 别名入口或别名图标缺失。执行 `dsh-desktop install --force`。 |
+| 任务栏显示黄色圆圈加白色 W | app_id 别名入口或别名图标缺失。执行 `dsh-lxi install --force`。 |
 | 窗口显示 `dsh web authentication required` | 未取得带 token 的地址，且独立配置目录中没有有效 cookie。重启一次 `dsh web`。 |
 | 窗口开在默认浏览器配置中而非独立窗口 | 有意的兜底：未取得 token 且独立配置目录从未登录时，改用默认配置以避免 401。重启一次 `dsh web` 后恢复。 |
 | 窗口纵向拉满并贴住上下边缘 | KWin 规则未生效。检查 `~/.config/kwinrulesrc` 中是否存在某一段的 `description = DeepSeek Harness Window Rule`（段名是数字，不是这句话），然后执行 `qdbus6 org.kde.KWin /KWin reconfigure`。 |
-| Hyprland 下窗口铺满整个工作区，宽高设置没反应 | 这是**默认行为**：平铺布局下尺寸设置不生效。要固定尺寸，请在设置页打开「托管 Hyprland 窗口规则」，或执行 `dsh-desktop install --hyprland`。 |
-| Hyprland 下开了托管，窗口仍然铺满 | 检查 `~/.config/hypr/hyprland.conf`（或 `hyprland.lua`）里是否有 `dsh-desktop begin` 标记块。没有就说明写入被跳过了，执行 `dsh-desktop doctor` 看 `hyprland-rule` 一项给出的原因（常见：Hyprland 版本低于 0.53、尚未生成配置文件）。 |
-| GNOME 下窗口一开就最大化，宽高设置没反应 | 触发了 Mutter 的 auto-maximize（窗口面积超过逻辑工作区约 80%）。把宽高调到屏幕的 80% 以下，或自行执行 `gsettings set org.gnome.mutter auto-maximize false`（全局设置，插件不会代改）。`dsh-desktop doctor` 的 `gnome-window-size` 一项会算出具体占比。 |
+| Hyprland 下窗口铺满整个工作区，宽高设置没反应 | 这是**默认行为**：平铺布局下尺寸设置不生效。要固定尺寸，请在设置页打开「托管 Hyprland 窗口规则」，或执行 `dsh-lxi install --hyprland`。 |
+| Hyprland 下开了托管，窗口仍然铺满 | 检查 `~/.config/hypr/hyprland.conf`（或 `hyprland.lua`）里是否有 `dsh-lxi begin` 标记块。没有就说明写入被跳过了，执行 `dsh-lxi doctor` 看 `hyprland-rule` 一项给出的原因（常见：Hyprland 版本低于 0.53、尚未生成配置文件）。 |
+| GNOME 下窗口一开就最大化，宽高设置没反应 | 触发了 Mutter 的 auto-maximize（窗口面积超过逻辑工作区约 80%）。把宽高调到屏幕的 80% 以下，或自行执行 `gsettings set org.gnome.mutter auto-maximize false`（全局设置，插件不会代改）。`dsh-lxi doctor` 的 `gnome-window-size` 一项会算出具体占比。 |
 | GNOME 下 `gnome-window-size` 只说「原生遵循」但没给数字 | 读不到逻辑工作区（`gdctl show` 失败，例如不在 GNOME 会话里，或 GNOME 版本过旧）。这是正常降级，不影响窗口本身 —— GNOME 本来就遵循 `--window-size`。 |
-| 启动器没有反应 | 以 `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-desktop-app` 运行查看调试输出。日志位于 `$XDG_RUNTIME_DIR/dsh-desktop-web.log`。 |
-| 右键「以终端界面运行 (dsh-tui)」打开的是一个普通 bash，并提示 `Could not find 'dsh'` | 入口里写的是裸 `dsh`，而桌面会话的 `PATH` 不含用户级 bin。执行 `dsh-desktop install --force` 刷新入口，动作会改用 `dsh` 的绝对路径。 |
+| 启动器没有反应 | 以 `DSH_DESKTOP_DEBUG=1 ~/.local/bin/dsh-lxi-app` 运行查看调试输出。日志位于 `$XDG_RUNTIME_DIR/dsh-lxi-web.log`。 |
+| 右键「以终端界面运行 (dsh-tui)」打开的是一个普通 bash，并提示 `Could not find 'dsh'` | 入口里写的是裸 `dsh`，而桌面会话的 `PATH` 不含用户级 bin。执行 `dsh-lxi install --force` 刷新入口，动作会改用 `dsh` 的绝对路径。 |
 | 服务是刚由启动器拉起的，窗口要等十几秒才出现 | 有意的：自启路径会先等 `dsh web:` 落定行，再等一次会话 API 探测成功，两道都过才开窗。服务端插件集越大，这段等待越长；窗口出现时后端一定是可用的。 |
 | 关闭窗口后服务仍在运行 | 当前为 `shared` 模式，或服务由别处启动，本插件不接管。改用 `dedicated` 并从桌面图标启动服务。 |
-| 启动时报 `dsh-linux-desktop: pending (waiting for service: settingsScope)`，`dsh web` 起不来 | DSH 0.1.7 起把设置服务从 `settingsScope` 改名成了 `configForms`，0.4.1 及更早的版本会一直等那个不存在的服务。升级到 0.4.2 及以上。 |
+| 启动时报 `dsh-linux-integration: pending (waiting for service: settingsScope)`，`dsh web` 起不来 | DSH 0.1.7 起把设置服务从 `settingsScope` 改名成了 `configForms`，0.4.1 及更早的版本会一直等那个不存在的服务。升级到 0.4.2 及以上。 |
 | 设置页「插件配置」里没有「桌面集成」卡片 | 宿主没注册命名空间。确认 `dsh web` 已重启过，且 `@deepseek-ai/schemastery` 可被加载；本地检出方式安装时见上文「设置页卡片与 config.json 的关系」。 |
 
 ## 开发
@@ -307,7 +307,7 @@ dsh plugin --profile web exec dsh-desktop doctor
 node test/smoke.mjs                                   # 冒烟测试，用例共 158 项，零依赖
 node scripts/prepublish-check.mjs                     # 发布前校验
 npm pack --dry-run                                    # 校验打包产物
-node bin/dsh-desktop.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录
+node bin/dsh-lxi.js install --root /tmp/sandbox   # 沙箱安装，不触碰真实目录
 ```
 
 以上前三条是 CI 在每次 push 与 PR 时执行的命令，也是合并前必须通过的门。CI 覆盖 Node 20、22、24，并在 macOS 上额外验证「非 Linux 平台安静地不执行任何操作」。
@@ -372,7 +372,7 @@ npm run snapshot -- --profile web    # 打包，并把该 profile 的插件依�
 
 ## 架构决策
 
-**[docs/internals.md](https://github.com/ffyfox/dsh-linux-desktop/blob/main/docs/internals.md)** 记录了本项目的设计取舍与实测结论：目录结构、运行时状态的产生与消费、三条决定架构的实测结论，以及「不影响 dsh web 本身」的具体机制。
+**[docs/internals.md](https://github.com/ffyfox/dsh-linux-integration/blob/main/docs/internals.md)** 记录了本项目的设计取舍与实测结论：目录结构、运行时状态的产生与消费、三条决定架构的实测结论，以及「不影响 dsh web 本身」的具体机制。
 
 ## 许可证
 

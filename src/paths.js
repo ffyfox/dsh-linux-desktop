@@ -5,14 +5,14 @@
  * 环境变量 `DSH_DESKTOP_ROOT`，就能把全部读写重定向到沙箱目录，不会碰到
  * 真实用户目录。
  *
- * @module dsh-linux-desktop/paths
+ * @module dsh-linux-integration/paths
  */
 
 import os from 'node:os'
 import path from 'node:path'
 
 /** 应用在 XDG 目录里使用的统一目录名。 */
-export const APP_DIRNAME = 'dsh-desktop'
+export const APP_DIRNAME = 'dsh-lxi'
 
 /** 图标主题里注册的图标名（不含扩展名）。 */
 export const ICON_NAME = 'deepseek-harness'
@@ -53,16 +53,16 @@ export function iconFileFor(iconThemeDir, size) {
 export const DESKTOP_ENTRY_ID = 'dsh'
 
 /** 由本插件生成的启动脚本文件名。 */
-export const LAUNCHER_FILENAME = 'dsh-desktop-app'
+export const LAUNCHER_FILENAME = 'dsh-lxi-app'
 
 /**
  * 放到 `~/.local/bin` 的 CLI 垫片文件名。
  *
- * 为什么需要它：`dsh-desktop` 这个 bin 装完在 `<profile>/node_modules/.bin/` 里，
- * **不在用户的 PATH 上**。于是「dsh-desktop stop」这种提示就没法照做。垫片把
+ * 为什么需要它：`dsh-lxi` 这个 bin 装完在 `<profile>/node_modules/.bin/` 里，
+ * **不在用户的 PATH 上**。于是「dsh-lxi stop」这种提示就没法照做。垫片把
  * 绝对路径固化下来，让命令真的能用。
  */
-export const CLI_SHIM_FILENAME = 'dsh-desktop'
+export const CLI_SHIM_FILENAME = 'dsh-lxi'
 
 /**
  * 推导全部相关路径。
@@ -103,7 +103,7 @@ export function resolvePaths(env = process.env) {
     ? path.join(sandbox, 'runtime')
     : env.XDG_RUNTIME_DIR
       ? env.XDG_RUNTIME_DIR
-      : path.join(os.tmpdir(), `dsh-desktop-runtime-${uid}`)
+      : path.join(os.tmpdir(), `dsh-lxi-runtime-${uid}`)
 
   const configDir = path.join(xdgConfigHome, APP_DIRNAME)
   const applicationsDir = path.join(xdgDataHome, 'applications')

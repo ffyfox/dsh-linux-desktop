@@ -21,7 +21,7 @@
  *      - 写入前先用 `--verify-config` 离线校验（它不起合成器、不占屏幕）。
  *      - 版本低于 0.53 时**跳过并警告**，不写未经实测的旧语法。
  *
- * @module dsh-linux-desktop/hyprland
+ * @module dsh-linux-integration/hyprland
  */
 
 import { execFileSync } from 'node:child_process'
@@ -30,11 +30,11 @@ import os from 'node:os'
 import path from 'node:path'
 
 /** 我们那条规则的名字（Lua 的具名规则用得到，也兼作识别标记）。 */
-export const RULE_NAME = 'dsh-desktop-window-size'
+export const RULE_NAME = 'dsh-lxi-window-size'
 
 /** 内联块的起止标记。带标记是为了「精确删除自己，绝不动用户一行」。 */
-export const MARK_BEGIN = 'dsh-desktop begin'
-export const MARK_END = 'dsh-desktop end'
+export const MARK_BEGIN = 'dsh-lxi begin'
+export const MARK_END = 'dsh-lxi end'
 
 /**
  * 支持 `match:class` 新语法的**最低** Hyprland 版本。

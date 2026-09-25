@@ -16,7 +16,7 @@
 src/
   index.js          Cordis 宿主插件行（运行时状态发布 + 幂等自愈）
   installer.js      install / uninstall / status 编排
-  cli.js            dsh-desktop 命令行
+  cli.js            dsh-lxi 命令行
   paths.js          XDG 路径推导（含沙箱隔离）
   detect.js         桌面环境 / 会话 / 浏览器探测
   config.js         配置默认值、校验、读写
@@ -27,7 +27,7 @@ src/
   runtime.js        运行时状态发布
   server.js         端口探测 / 进程校验 / 启停
   assets/           图标位图 whale-girl.png + 启动器 bash 模板
-bin/dsh-desktop.js  CLI 可执行入口
+bin/dsh-lxi.js  CLI 可执行入口
 scripts/            发布前校验
 test/smoke.mjs      冒烟测试
 docs/               实现细节
@@ -46,7 +46,7 @@ dsh web 进程
    └── 插件行 linux-desktop（inject: connection + webServer）
          ├── ctx.connection.authenticatedUrl()  → 带 token 的地址
          ├── ctx.webServer.port                 → 实际端口
-         └── 写入 $XDG_RUNTIME_DIR/dsh-desktop/runtime.env   (0600)
+         └── 写入 $XDG_RUNTIME_DIR/dsh-lxi/runtime.env   (0600)
                   pid=… / host=… / port=… / url=…
                   ↑ 启动器读它；同时写一份 runtime.json 给工具用
 ```
@@ -146,7 +146,7 @@ README 里对用户承诺的是结论，这里是兑现结论的手段。
 
 另外两条硬性约定：
 
-- **规则内联进主配置**，用 `dsh-desktop begin` / `end` 注释标记包起来。**绝不用 `source =`** —— 实测 `source` 指向不存在的文件同样是硬错误，一旦我们的文件被删（清理、同步冲突、卸载不干净），用户的整个配置都会加载失败。
+- **规则内联进主配置**，用 `dsh-lxi begin` / `end` 注释标记包起来。**绝不用 `source =`** —— 实测 `source` 指向不存在的文件同样是硬错误，一旦我们的文件被删（清理、同步冲突、卸载不干净），用户的整个配置都会加载失败。
 - **两套语法按文件格式选**：`.lua` 用 `hl.window_rule({...})`，`.conf` 用 `windowrule = match:class ...`。两者同时存在时 `.lua` 优先，与 Hyprland 自身行为一致。
 
 ### 4.3.1 Hyprland 为什么必须强制浮动
@@ -176,7 +176,7 @@ GNOME 既没有窗口规则配置文件，也没有对应的 dconf 键 —— �
 
 启动器只停**它自己启动的**服务（`STARTED_BY_US` 闸门）。这就是「关掉窗口后服务还在」有时是**正确行为**的原因：那个服务是你在终端里手动启的。
 
-`dsh-desktop stop` / `restart` 是**你明确发起**的操作，所以它们会动手，但仍然先读 `/proc/<pid>/cmdline` 确认目标真的是 `dsh web`，不是就拒绝并提示 `--force`。
+`dsh-lxi stop` / `restart` 是**你明确发起**的操作，所以它们会动手，但仍然先读 `/proc/<pid>/cmdline` 确认目标真的是 `dsh web`，不是就拒绝并提示 `--force`。
 
 > 开发提示：沙箱模式（`DSH_DESKTOP_ROOT`）能隔离**文件**，但**隔离不了端口**。在沙箱里测试 `stop` / `restart` 时，端口查找有可能命中你真实在跑的服务 —— 所以 `resolveServerTarget` 有 `allowPortLookup` 闸门，默认在沙箱下关闭。
 

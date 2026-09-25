@@ -1,4 +1,4 @@
-# dsh-linux-desktop 的 profile 补丁层。
+# dsh-linux-integration 的 profile 补丁层。
 #
 # 本层只插入一行：Linux 桌面集成宿主插件。它在 dsh web 的 HTTP 服务绑定之后：
 #   1. 把「端口 + 进程号 + 带 token 的地址」发布到运行时文件，供桌面启动器读取；
@@ -9,4 +9,4 @@
 # 想要的：桌面集成只在 dsh web 里生效，不影响其它 profile。
 - insert:
     - id: linux-desktop
-      name: dsh-linux-desktop
+      name: dsh-linux-integration

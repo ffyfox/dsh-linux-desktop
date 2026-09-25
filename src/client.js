@@ -33,7 +33,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-linux-desktop',
+  id: 'dsh-linux-integration',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
     const NAMESPACE = 'linux-desktop'
 
     /** 本包自己的文案命名空间。 */
-    const LOCALE_NS = 'dsh-linux-desktop'
+    const LOCALE_NS = 'dsh-linux-integration'
 
     // -----------------------------------------------------------------------
     // 样式
@@ -98,10 +98,10 @@ window.__ModuleLoader__.load({
       '.dsld_sizeRow .dsld_input{width:100%;min-width:0;box-sizing:border-box}',
     ].join('')
 
-    const CSS_TAG_ID = 'dsh-linux-desktop/card.css'
+    const CSS_TAG_ID = 'dsh-linux-integration/card.css'
     if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css=${JSON.stringify(CSS_TAG_ID)}]`) === null) {
       const tag = document.createElement('style')
-      tag.dataset.plugin = 'dsh-linux-desktop'
+      tag.dataset.plugin = 'dsh-linux-integration'
       tag.dataset.pluginCss = CSS_TAG_ID
       tag.textContent = CSS_SOURCE
       document.head.appendChild(tag)
@@ -835,7 +835,7 @@ window.__ModuleLoader__.load({
      */
     function apply(ctx) {
       const t = ctx.locale.bind(LOCALE_NS)
-      ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-linux-desktop: card dictionaries')
+      ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-linux-integration: card dictionaries')
 
       // 设置命名空间的服务名在 DSH 0.1.7 从 `settingsScope` 改成了 `configForms`，
       // 两个名字都要认。
